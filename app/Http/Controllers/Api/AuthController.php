@@ -59,28 +59,43 @@ class AuthController extends Controller
         ]);
 
         $result = DB::transaction(function () use ($validated) {
+            /*
+             * 1. Create user.
+             */
             $user = User::create([
                 'name' => $validated['name'],
                 'email' => $validated['email'],
                 'password' => $validated['password'],
             ]);
 
+            /*
+             * 2. Create first store.
+             */
             $store = Store::create([
                 'owner_id' => $user->id,
                 'name' => $validated['store_name'],
                 'slug' => $validated['store_slug'],
             ]);
 
+            /*
+             * 3. Create owner membership.
+             */
             $user->stores()->attach($store->id, [
                 'role' => StoreRole::OWNER->value,
                 'is_active' => true,
             ]);
 
+            /*
+             * 4. Get active Free plan.
+             */
             $freePlan = Plan::query()
                 ->where('slug', 'free')
                 ->where('is_active', true)
                 ->firstOrFail();
 
+            /*
+             * 5. Create subscription.
+             */
             $subscription = Subscription::create([
                 'store_id' => $store->id,
                 'plan_id' => $freePlan->id,
@@ -89,9 +104,22 @@ class AuthController extends Controller
                 'starts_at' => now(),
             ]);
 
-            $token = $user->createToken(
+            /*
+             * 6. Create Sanctum token.
+             *
+             * Token ini langsung diberi current_store_id
+             * agar setelah register Flutter langsung berada
+             * pada store pertama miliknya.
+             */
+            $accessToken = $user->createToken(
                 'flutter-app'
-            )->plainTextToken;
+            );
+
+            $accessToken->accessToken->forceFill([
+                'current_store_id' => $store->id,
+            ])->save();
+
+            $token = $accessToken->plainTextToken;
 
             return [
                 'user' => $user,
@@ -103,6 +131,7 @@ class AuthController extends Controller
 
         return response()->json([
             'message' => 'Registrasi berhasil.',
+
             'data' => [
                 'user' => [
                     'id' => $result['user']->id,
@@ -122,6 +151,7 @@ class AuthController extends Controller
                         'name' => $result['subscription']->plan->name,
                         'slug' => $result['subscription']->plan->slug,
                     ],
+
                     'status' => $result['subscription']->status,
                     'billing_cycle' => $result['subscription']->billing_cycle,
                     'starts_at' => $result['subscription']->starts_at?->toISOString(),
@@ -135,6 +165,10 @@ class AuthController extends Controller
 
     /**
      * Login user.
+     *
+     * Jika user memiliki beberapa store aktif,
+     * untuk sementara store aktif pertama berdasarkan ID
+     * akan digunakan sebagai current store.
      */
     public function login(Request $request): JsonResponse
     {
@@ -165,12 +199,38 @@ class AuthController extends Controller
             ]);
         }
 
-        $token = $user->createToken(
+        /*
+         * Ambil store aktif pertama yang memang menjadi
+         * membership user.
+         */
+        $currentStore = $user->stores()
+            ->where('stores.is_active', true)
+            ->wherePivot('is_active', true)
+            ->orderBy('stores.id')
+            ->first();
+
+        /*
+         * Buat token Sanctum.
+         */
+        $accessToken = $user->createToken(
             'flutter-app'
-        )->plainTextToken;
+        );
+
+        /*
+         * Simpan current store pada token.
+         *
+         * Jika user belum memiliki store aktif,
+         * nilainya akan NULL.
+         */
+        $accessToken->accessToken->forceFill([
+            'current_store_id' => $currentStore?->id,
+        ])->save();
+
+        $token = $accessToken->plainTextToken;
 
         return response()->json([
             'message' => 'Login berhasil.',
+
             'data' => [
                 'user' => [
                     'id' => $user->id,
