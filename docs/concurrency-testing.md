@@ -1,0 +1,72 @@
+# Concurrency Testing (MySQL)
+
+> Status: **Terverifikasi pada MySQL 8.4.3** (Phase 2.1).
+> Harness: `tests/Concurrency/`.
+
+Dokumen ini menjelaskan cara membuktikan perilaku concurrency yang **tidak**
+dapat diverifikasi oleh test suite SQLite (`:memory:`), karena SQLite tidak
+mendukung `SELECT ... FOR UPDATE`.
+
+---
+
+## 1. Prinsip keamanan
+
+- Harness memakai **database MySQL khusus**: `saas_pos_concurrency_test`.
+- `tests/Concurrency/boot.php` **menolak berjalan** jika nama database bukan
+  `saas_pos_concurrency_test` (guard keras terhadap database development
+  `saas_pos_db`).
+- Koneksi di-`config()` + `DB::purge()` di runtime sehingga tidak bisa
+  dikembalikan ke dev DB oleh `.env`.
+- Harness **tidak** menjalankan `migrate:fresh`, `db:wipe`, `truncate`, atau
+  `DROP`. Hanya `CREATE DATABASE IF NOT EXISTS` dan `migrate` (idempoten).
+- Fixtures memakai store/user unik per skenario, jadi akumulasi data tidak
+  mengganggu hasil.
+
+---
+
+## 2. Cara menjalankan
+
+```sh
+php tests/Concurrency/run.php
+```
+
+Opsional menentukan nama DB (harus tetap `saas_pos_concurrency_test`):
+
+```sh
+CONCURRENCY_DB=saas_pos_concurrency_test php tests/Concurrency/run.php
+```
+
+Runner akan:
+1. Membuat DB jika belum ada, menjalankan `migrate`.
+2. Menjalankan setiap skenario dengan **banyak proses PHP paralel** memakai
+   `proc_open`, disinkronkan lewat barrier file (semua worker menunggu file
+   `GO` sebelum masuk critical section).
+3. Memeriksa invariant dan mencetak `PASS`/`FAIL`.
+
+Tidak dijalankan sebagai bagian dari `php artisan test`.
+
+---
+
+## 3. Skenario & hasil (MySQL 8.4.3)
+
+| Skenario | Beban | Hasil | Invariant |
+|----------|-------|-------|-----------|
+| Order numbers | 10 worker buat order toko sama | `successes=10 distinct_numbers=10 db_orders=10` | Nomor unik, tidak ada tabrakan |
+| Overpayment | 8 worker bayar 5.000 atas order 10.000 | `successes=2 validation_failures=6 paid_sum=10000 status=paid` | Total dibayar == total order, tidak overpaid |
+| Void race | 4 worker void payment yang sama | `successes=1 conflicts=3 payment_status=voided` | Tepat satu void, status order dihitung ulang |
+| Item quota | 12 worker buat item, limit plan 5 | `successes=5 limit_failures=7 items_in_db=5` | Tidak melewati kuota |
+
+Kesimpulan: **PASS** — `lockForUpdate` pada baris `stores` (nomor order, kuota
+item) dan baris `orders` (pembayaran/void) benar-benar men-serialisasi akses
+pada MySQL InnoDB.
+
+---
+
+## 4. Batasan
+
+- Harness membuktikan pada **satu mesin, multi-proses**; bukan uji beban
+  terdistribusi.
+- Test suite reguler (`php artisan test`) tetap memakai SQLite dan **bukan**
+  bukti concurrency; hanya protokol & logika.
+- Item quota memakai `CatalogItemService` (lock baris store). Order memakai
+  `OrderService`; payment/void memakai `PaymentService` (lock baris order).

@@ -214,11 +214,13 @@ Semua pembuatan item **wajib** melalui service ini agar protokol lock konsisten
 (dua create bersamaan untuk toko yang sama akan ter-serialisasi; request kedua
 menghitung insert pertama).
 
-**Batas jujur:** row lock hanya nyata di MySQL 8 InnoDB. SQLite (test) tidak
-mendukung `FOR UPDATE`, sehingga **test concurrency sejati tidak dapat
-dijalankan di lingkungan ini**. Yang diuji hanya perilaku kuota pada satu
-request. Verifikasi race condition memerlukan integration test tambahan pada
-MySQL (mis. dua proses paralel), yang direncanakan, belum ada.
+**Terverifikasi (Phase 2.1):** pada MySQL 8.4.3, 12 worker paralel membuat item
+untuk toko dengan limit plan 5 menghasilkan tepat 5 item (7 ditolak
+`item_limit_reached`). SQLite (test suite) hanya memverifikasi protokol, bukan
+isolasi paralel. Lihat `docs/concurrency-testing.md`.
+
+**Batas:** row lock hanya nyata di MySQL 8 InnoDB. SQLite (test) tidak
+mendukung `FOR UPDATE`, sehingga test suite reguler bukan bukti concurrency.
 
 ---
 

@@ -3,7 +3,10 @@
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CategoryController;
 use App\Http\Controllers\Api\CurrentStoreController;
+use App\Http\Controllers\Api\CustomerController;
 use App\Http\Controllers\Api\ItemController;
+use App\Http\Controllers\Api\OrderController;
+use App\Http\Controllers\Api\PaymentController;
 use App\Http\Controllers\Api\UserController;
 use Illuminate\Support\Facades\Route;
 
@@ -103,6 +106,76 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/items/{item}', [
             ItemController::class,
             'destroy',
+        ]);
+
+        Route::get('/customers', [
+            CustomerController::class,
+            'index',
+        ]);
+
+        Route::post('/customers', [
+            CustomerController::class,
+            'store',
+        ]);
+
+        Route::get('/customers/{customer}', [
+            CustomerController::class,
+            'show',
+        ]);
+
+        Route::put('/customers/{customer}', [
+            CustomerController::class,
+            'update',
+        ]);
+
+        Route::patch('/customers/{customer}', [
+            CustomerController::class,
+            'update',
+        ]);
+
+        Route::delete('/customers/{customer}', [
+            CustomerController::class,
+            'destroy',
+        ]);
+
+        Route::get('/orders', [
+            OrderController::class,
+            'index',
+        ]);
+
+        Route::post('/orders', [
+            OrderController::class,
+            'store',
+        ]);
+
+        Route::get('/orders/{order}', [
+            OrderController::class,
+            'show',
+        ]);
+
+        Route::patch('/orders/{order}/fulfillment', [
+            OrderController::class,
+            'updateFulfillment',
+        ]);
+
+        Route::get('/orders/{order}/payments', [
+            PaymentController::class,
+            'indexForOrder',
+        ]);
+
+        Route::post('/orders/{order}/payments', [
+            PaymentController::class,
+            'store',
+        ]);
+
+        Route::get('/payments/{payment}', [
+            PaymentController::class,
+            'show',
+        ]);
+
+        Route::post('/payments/{payment}/void', [
+            PaymentController::class,
+            'void',
         ]);
     });
 });

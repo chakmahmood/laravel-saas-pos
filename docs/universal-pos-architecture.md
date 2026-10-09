@@ -150,9 +150,9 @@ snapshot.
 - Nilai: `retail`, `restaurant`, `laundry`, `repair`, `salon`, `other`.
 - Kolom `stores.business_type` sudah ada; register menerima nilai opsional.
 
-### 4.2 Rencana — Universal POS
+### 4.2 Universal POS — status per Phase 2
 
-#### `categories` (Rencana)
+#### `categories` (Sudah — Phase 1a)
 - `id`, `store_id`, `parent_id` (nullable, self FK), `name`,
   `type` (nullable, item type jika kategori dikhususkan), `sort_order`,
   `is_active`, timestamps.
@@ -160,7 +160,7 @@ snapshot.
 - Tanggung jawab: pengelompokan item. **Wajib** `store_id` = toko aktif.
 - Menghapus kategori: pilih `nullOnDelete` pada `items.category_id`.
 
-#### `items` — katalog universal (Rencana, inti Phase 1)
+#### `items` — katalog universal (Sudah — Phase 1b)
 | Field | Tipe | Catatan |
 |-------|------|---------|
 | `id` | bigint | |
@@ -185,12 +185,12 @@ Index/unique yang direkomendasikan:
 - `index(store_id, type)`
 - `index(store_id, category_id)`
 
-#### `customers` (Rencana)
+#### `customers` (Sudah — Phase 2, soft delete)
 - `id`, `store_id`, `name`, `phone` nullable, `email` nullable, `address`
   nullable, `note` nullable, `is_active`, timestamps.
 - Unique opsional `(store_id, phone)`. Tanpa login/loyalty dulu.
 
-#### `orders` (Rencana)
+#### `orders` (Sudah — Phase 2)
 | Field | Tipe | Catatan |
 |-------|------|---------|
 | `id` | bigint | |
@@ -218,7 +218,7 @@ Index/unique yang direkomendasikan:
 Unique `(store_id, number)`; index `(store_id, placed_at)`,
 `(store_id, status)`, `(store_id, payment_status)`.
 
-#### `order_items` (Rencana)
+#### `order_items` (Sudah — Phase 2)
 | Field | Tipe | Catatan |
 |-------|------|---------|
 | `id` | bigint | |
@@ -236,7 +236,7 @@ Unique `(store_id, number)`; index `(store_id, placed_at)`,
 | `note` | string nullable | |
 | timestamps | | |
 
-#### `payments` (Rencana)
+#### `payments` (Sudah — Phase 2)
 | Field | Tipe | Catatan |
 |-------|------|---------|
 | `id` | bigint | |
@@ -250,15 +250,21 @@ Unique `(store_id, number)`; index `(store_id, placed_at)`,
 | `cash_session_id` | FK cash_sessions nullable | rekonsiliasi kas |
 | timestamps | | |
 
-#### `refunds` (Rencana)
+#### `refunds` (Rencana — belum ada alur refund)
 - `id`, `order_id`, `payment_id` nullable, `amount`, `reason`,
   `refunded_by` (FK users nullable), `refunded_at`, timestamps.
 - Alternatif "payment negatif" ditolak agar audit lebih jelas.
 
-#### `order_status_histories` (Rencana — audit)
+#### `order_status_histories` (Sudah — Phase 2, audit terbatas)
 - `id`, `order_id`, `from_status`, `to_status`, `from_payment_status`,
   `to_payment_status`, `changed_by` (FK users nullable), `reason` nullable,
   `created_at`.
+
+#### `store_sequences` (Sudah — Phase 2)
+- `id`, `store_id`, `sequence_key` (mis. `orders:2026-10-09`), `last_value`,
+  timestamps; unique `(store_id, sequence_key)`.
+- Counter persisten per toko untuk nomor dokumen yang aman dari race. Nomor
+  order tidak pernah diturunkan dari jumlah baris.
 
 #### `cash_sessions` (Rencana)
 - `id`, `store_id`, `opened_by`, `opened_at`, `opening_float`, `closed_by`
@@ -389,15 +395,18 @@ Konsekuensi & catatan:
 
 ### 6.1 Dua status terpisah (bukan `paid` saja)
 
-- `orders.status` (fulfillment): `draft` → `open` → `completed` / `cancelled`.
-- `orders.payment_status` (keuangan): `unpaid` → `partial` → `paid`, plus
-  `refunded` / `partially_refunded`.
+Implementasi aktual (Phase 2):
+
+- `orders.fulfillment_status` (operasional): `pending` → `processing` →
+  `completed` / `cancelled`. `completed` dan `cancelled` final.
+- `orders.payment_status` (keuangan): `unpaid` → `partially_paid` → `paid`.
+  `refunded` disediakan tetapi belum reachable (belum ada alur refund).
 
 Ini mendukung:
-- **Belum dibayar:** `status=open`, `payment_status=unpaid`.
-- **Bayar sebagian:** `payment_status=partial`, `paid_total < grand_total`.
+- **Belum dibayar:** `fulfillment_status=pending`, `payment_status=unpaid`.
+- **Bayar sebagian:** `payment_status=partially_paid`, `paid_amount < total_amount`.
 - **Lunas:** `payment_status=paid`.
-- **Kembalian:** `change_due = paid_total - grand_total` untuk tunai.
+- Kembalian tunai/`change_due` **belum** dimodelkan (masih manual).
 
 ### 6.2 Pembayaran tunai & non-tunai
 
@@ -413,11 +422,12 @@ Ini mendukung:
 
 ### 6.4 Pembatalan & refund
 
-- **Void/cancel order:** hanya bila belum ada pembayaran sukses, atau
-  dibatalkan dengan membuat refund. `status=completed` → `cancelled`
-  memicu `refunds` bila ada `paid_total > 0`.
-- **Refund:** tabel `refunds` (bukan payment negatif) agar jejak audit jelas;
-  `payment_id` opsional bila asal pembayaran diketahui.
+Implementasi aktual (Phase 2):
+- **Cancel order:** ditolak (409 `order_conflict`) bila masih ada pembayaran
+  aktif; void pembayaran dulu. Hanya owner/admin.
+- **Void payment:** record tidak dihapus, hanya ditandai `voided` + aktor/waktu
+  alasan; `payment_status` order dihitung ulang.
+- **Refund:** tabel `refunds` belum dibuat; status `refunded` belum reachable.
 - Perubahan status tercatat di `order_status_histories`.
 
 ### 6.5 Presisi uang & kuantitas
@@ -430,13 +440,13 @@ Ini mendukung:
 
 ### 6.6 Nomor order unik per toko
 
-- Unique `(store_id, number)`.
-- Format rekomendasi: `{PREFIX}-{YYYYMMDD}-{urut}` (mis. `TRX-20261009-0007`).
-- Pembuatan nomor harus di dalam `DB::transaction` yang sama dengan insert
-  order. Pencegahan tabrakan konkuren memakai `lockForUpdate()` pada baris
-  counter/sequence per store, **atau** retry saat unique violation.
-- Status: **belum diimplementasikan**; pendekatan ini wajib disertai test
-  konkurensi sebelum diklaim selesai (lihat §11).
+Implementasi aktual (Phase 2):
+- Unique `(store_id, order_number)`.
+- Format: `TRX-{YYYYMMDD}-{0001}` (mis. `TRX-20261009-0007`).
+- Sumber nomor: tabel `store_sequences` (counter persisten), di-`increment`
+  di dalam transaksi yang memegang `lockForUpdate()` pada baris `stores`.
+- **Belum ada test konkurensi MySQL nyata** (SQLite tidak mendukung row lock);
+  lihat §11 dan `docs/order-api.md` §4.
 
 ### 6.7 Database transaction
 
@@ -607,11 +617,10 @@ butuh persetujuan (§11).
 
 - **Rencana:** satu `QuotaService` (mis. `assertCanAddItem(Store $store)`)
   dipanggil sebelum insert, di dalam `DB::transaction`.
-- **Race condition BELUM terselesaikan.** Dua request bersamaan dapat sama-sama
-  lolos `count()` lalu insert. Pendekatan yang direkomendasikan:
-  `lockForUpdate()` pada baris `stores`/`subscriptions` sebelum menghitung,
-  atau kolom counter atomik di store. **Wajib diiringi test konkurensi**
-  sebelum diklaim beres. Dokumen ini **tidak** mengklaim solusi sudah ada.
+- **Terselesaikan & terverifikasi (Phase 2.1):** `CatalogItemService` mengunci
+  baris `stores` (`lockForUpdate`) lalu menghitung kuota. Diverifikasi pada
+  MySQL 8.4.3: 12 worker paralel, limit 5 → tepat 5 item
+  (`docs/concurrency-testing.md`).
 - Harga plan dan data subscription existing **tidak diubah** tanpa persetujuan.
 
 ---
@@ -623,11 +632,13 @@ butuh persetujuan (§11).
 | Katalog satu tabel menampung kolom tak relevan | Sedikit redundan | Batasi field; field spesifik ke tabel ekstensi |
 | Soft delete + unique SKU | SKU tidak bisa dipakai ulang | Hard delete katalog + snapshot order |
 | `max_products` tidak menghitung varian | Kuota bisa dilewati | Batasi/kuota varian di fase varian |
-| Race condition kuota | Melebihi batas | `lockForUpdate` + test konkurensi (belum ada) |
+| Race condition kuota | Melebihi batas | `lockForUpdate` baris store — **terverifikasi MySQL** (`docs/concurrency-testing.md`) |
 | `max_stores` tanpa model akun | Tidak bisa ditegakkan | Butuh keputusan model akun |
 | Tanpa global scope | Query bisa lupa filter tenant | Code review + test isolasi tiap modul baru |
 | Role string tanpa policy | Akses tidak granular | Tambah Policies bertahap |
-| Nomor order konkuren | Duplikat nomor | Unique `(store_id, number)` + lock/retry |
+| Nomor order konkuren | Duplikat nomor | `store_sequences` + `lockForUpdate` — **terverifikasi MySQL** |
+| Overpayment paralel | Saldo melebihi total | `lockForUpdate` baris order — **terverifikasi MySQL** |
+| Hard delete order | Payment/history ikut terhapus | Tidak ada endpoint hapus order; histori terjaga |
 | Snapshot vs referensi | Data ganda | Snapshot disengaja untuk audit |
 | `business_type` baru | Modul belum lengkap | `other` default; gating bertahap |
 
@@ -637,9 +648,9 @@ butuh persetujuan (§11).
 
 Detail per fase ada di `docs/universal-pos-roadmap.md`.
 
-1. **Phase 0 (selesai/ini):** audit + `business_type` + dokumentasi.
-2. **Phase 1:** Categories API + Catalog Items API (+ kuota item + policy).
-3. **Phase 2:** Customers API + Order & Order Items + Payments (tanpa gateway).
+1. **Phase 0 (selesai):** audit + `business_type` + dokumentasi.
+2. **Phase 1 (selesai):** Categories API + Catalog Items API (+ kuota item + policy).
+3. **Phase 2 (selesai):** Customers API + Order & Order Items + Payments (tanpa gateway).
 4. **Phase 3:** Cash sessions + Sales reports.
 5. **Phase 4+:** Modul industri (retail inventory, F&B, laundry, servis, salon)
    dan varian/modifier/paket sesuai prioritas bisnis.

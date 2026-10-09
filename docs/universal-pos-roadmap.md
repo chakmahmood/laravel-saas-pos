@@ -41,26 +41,25 @@ dokumen disetujui.
 
 ## Phase 1 — Categories & Catalog Items
 
-Bergantung pada persetujuan Phase 0. **Belum dikerjakan.**
+**Selesai (Phase 1a & 1b).**
 
 ### Category API
-- [ ] Migrasi `categories` (store_id, parent_id, name, type, sort_order, is_active).
-- [ ] Model `Category` + relasi `store()` & `items()`.
-- [ ] `CategoryController`: index/store/show/update/destroy.
-- [ ] Validasi: `store_id` dari token; kategori induk harus satu toko.
-- [ ] Policy `CategoryPolicy` (owner/admin boleh, cashier tidak).
-- [ ] Feature test isolasi tenant + validasi.
+- [x] Migrasi `categories` (store_id, name, description, is_active) + unique `(store_id, name)`.
+- [x] Model `Category` + relasi `store()` & `items()`.
+- [x] `CategoryController`: index/store/show/update/destroy.
+- [x] Validasi: `store_id` dari token; hapus kategori dipakai item → 409.
+- [x] Policy `CategoryPolicy` (owner/admin boleh, cashier tidak).
+- [x] Feature test isolasi tenant + validasi.
 
 ### Catalog Item API (`items`)
-- [ ] Migrasi `items` + `ItemType` enum.
-- [ ] Unique `(store_id, sku)` & `(store_id, barcode)`.
-- [ ] Model `Item` + relasi.
-- [ ] `ItemController`: CRUD + filter (type, category, is_active) + search.
-- [ ] Validasi kategori satu toko; SKU/barcode opsional; harga integer.
-- [ ] Integrasi kuota `max_products` (definisi §5.7) — **termasuk keputusan
-      race condition**.
-- [ ] Policy `ItemPolicy`.
-- [ ] Feature test: CRUD, isolasi, unique per toko, kuota, validasi tipe.
+- [x] Migrasi `items` + `ItemType` enum.
+- [x] Unique `(store_id, sku)` & `(store_id, barcode)`.
+- [x] Model `Item` + relasi.
+- [x] `ItemController`: CRUD + filter (type, category, is_active) + search.
+- [x] Validasi kategori satu toko; SKU/barcode opsional; harga integer.
+- [x] Integrasi kuota `max_products` + strategi lock (race MySQL belum diuji).
+- [x] Policy `ItemPolicy`.
+- [x] Feature test: CRUD, isolasi, unique per toko, kuota, validasi tipe.
 
 Exit criteria: `/api/categories` & `/api/items` stabil, terisolasi, teruji.
 
@@ -68,29 +67,49 @@ Exit criteria: `/api/categories` & `/api/items` stabil, terisolasi, teruji.
 
 ## Phase 2 — Customers, Orders, Payments
 
-**Belum dikerjakan.**
+**Selesai.** Tanpa gateway/refund/stok.
 
 ### Customers
-- [ ] Migrasi `customers`, model, API CRUD, policy, test.
+- [x] Migrasi `customers` (soft delete), model, API CRUD, policy, test.
+- [x] Tanpa unique phone/email (kebijakan duplikasi terdokumentasi).
 
 ### Orders & Order Items
-- [ ] Migrasi `orders` + `order_items` (snapshot).
-- [ ] Enum `OrderStatus`, `PaymentStatus`.
-- [ ] `OrderController` (create/get/list/cancel) — **tanpa** payment gateway.
-- [ ] Nomor order unik per toko + strategi konkurensi + test.
-- [ ] Perhitungan total server-side (jangan percaya total dari client).
-- [ ] Simpan snapshot nama/tipe/harga item.
+- [x] Migrasi `orders` + `order_items` (snapshot).
+- [x] Enum `FulfillmentStatus`, `PaymentStatus`.
+- [x] `OrderController` (create/get/list/fulfillment) — **tanpa** gateway.
+- [x] Nomor order unik per toko via `store_sequences` + `lockForUpdate`
+      (test konkurensi MySQL nyata belum ada).
+- [x] Perhitungan total server-side (harga/total client diabaikan).
+- [x] Snapshot nama/sku/tipe/unit/harga item.
 
 ### Payments
-- [ ] Migrasi `payments` + `refunds` + `order_status_histories`.
-- [ ] Enum `PaymentMethod`, `PaymentRecordStatus`.
-- [ ] Endpoint tambah pembayaran; update `paid_total` & `payment_status`.
-- [ ] Dukungan tunai (kembalian), non-tunai, partial, multi-metode.
-- [ ] Refund & void + audit history.
-- [ ] Feature test: unpaid, partial, paid, overpay/kembalian, refund,
-      multi-metode, isolasi tenant.
+- [x] Migrasi `payments` + `order_status_histories` (`refunds` belum).
+- [x] Enum `PaymentMethod`, `PaymentRecordStatus`.
+- [x] Endpoint catat pembayaran + void; recompute `paid_amount` & `payment_status`.
+- [x] Multi-metode & pembayaran sebagian; overpayment ditolak.
+- [ ] Kembalian tunai/`change_due` belum dimodelkan.
+- [ ] Refund belum diimplementasikan (status `refunded` reserved).
+- [x] Feature test: unpaid, partial, paid, overpay, void, isolasi tenant.
 
 Exit criteria: siklus transaksi lengkap tanpa gateway, audit status tercatat.
+
+---
+
+## Phase 2.1 — Audit, Concurrency & Hardening
+
+**Selesai.** Audit database/foreign key, perhitungan order, nomor order, dan
+payment/void.
+
+- [x] Audit migration order, FK, indeks, strategi delete (read-only).
+- [x] Guard overflow/precision uang di `OrderService` (batas 9e15, perkalian
+      integer eksak untuk kuantitas bulat).
+- [x] `OrderNumberService` membaca nilai counter terpersist (mulai `0001`).
+- [x] Harness concurrency MySQL nyata (`tests/Concurrency/`) — 4 skenario
+      **PASS** pada MySQL 8.4.3: nomor order, overpayment, void race, kuota item.
+- [x] Dokumentasi `docs/concurrency-testing.md`.
+- [x] Test regresi overflow & sekuens nomor order.
+- [ ] Penerapan migrasi ke DB development (menunggu persetujuan pengguna).
+- [ ] Batasan: harness 1 mesin/multi-proses; belum uji terdistribusi.
 
 ---
 
