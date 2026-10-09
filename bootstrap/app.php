@@ -1,10 +1,13 @@
 <?php
 
 use App\Http\Middleware\EnsureCurrentStore;
+use Illuminate\Auth\AuthenticationException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Http\Exceptions\ThrottleRequestsException;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
@@ -26,13 +29,37 @@ return Application::configure(basePath: dirname(__DIR__))
         );
 
         /*
-         * Keep error bodies stable and free of internal details. A model that
-         * cannot be found (including a resource belonging to another tenant)
-         * must never leak the Eloquent class name or the requested id, and a
-         * denied policy must return a machine-readable code.
+         * Every API error carries a stable machine-readable `code` and never
+         * leaks internal details (Eloquent class names, model ids, SQL, stack
+         * traces, tokens). Only JSON API requests are intercepted; non-JSON
+         * requests fall back to the framework default.
          */
-        $exceptions->render(function (NotFoundHttpException $exception, Request $request) {
-            if (! $request->is('api/*') && ! $request->expectsJson()) {
+        $json = fn (Request $request): bool => $request->is('api/*') || $request->expectsJson();
+
+        $exceptions->render(function (AuthenticationException $exception, Request $request) use ($json) {
+            if (! $json($request)) {
+                return null;
+            }
+
+            return response()->json([
+                'message' => 'Tidak terautentikasi.',
+                'code' => 'unauthenticated',
+            ], 401);
+        });
+
+        $exceptions->render(function (AccessDeniedHttpException $exception, Request $request) use ($json) {
+            if (! $json($request)) {
+                return null;
+            }
+
+            return response()->json([
+                'message' => 'Akses ditolak.',
+                'code' => 'forbidden',
+            ], 403);
+        });
+
+        $exceptions->render(function (NotFoundHttpException $exception, Request $request) use ($json) {
+            if (! $json($request)) {
                 return null;
             }
 
@@ -42,14 +69,26 @@ return Application::configure(basePath: dirname(__DIR__))
             ], 404);
         });
 
-        $exceptions->render(function (AccessDeniedHttpException $exception, Request $request) {
-            if (! $request->is('api/*') && ! $request->expectsJson()) {
+        $exceptions->render(function (ValidationException $exception, Request $request) use ($json) {
+            if (! $json($request)) {
                 return null;
             }
 
             return response()->json([
-                'message' => 'Akses ditolak.',
-                'code' => 'forbidden',
-            ], 403);
+                'message' => $exception->getMessage(),
+                'code' => 'validation_error',
+                'errors' => $exception->errors(),
+            ], 422);
+        });
+
+        $exceptions->render(function (ThrottleRequestsException $exception, Request $request) use ($json) {
+            if (! $json($request)) {
+                return null;
+            }
+
+            return response()->json([
+                'message' => 'Terlalu banyak permintaan. Silakan coba lagi nanti.',
+                'code' => 'too_many_requests',
+            ], 429, $exception->getHeaders());
         });
     })->create();

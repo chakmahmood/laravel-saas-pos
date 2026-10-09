@@ -185,10 +185,16 @@ Detail desain: `docs/inventory-design.md`; API: `docs/inventory-api.md`.
       tenant isolation, order/payment/cash, inventory, DB, API contract, lock
       ordering; rate limiting auth; kontrak error 403/404 aman. Laporan:
       `docs/backend-readiness-audit.md`. 306 tests / 1274 assertions PASS.
-- [ ] **Checkpoint berikutnya:** transfer antarlokasi, retur, laporan stok.
+- [x] **Checkpoint 6 (API Contract, Store Lifecycle & FE Readiness):**
+      OpenAPI 3.1 (`docs/api/openapi.yaml`, 51 operasi), FE integration guide,
+      deployment checklist, kebijakan store lifecycle, standarisasi error
+      401/422/429, legacy Pint dibersihkan. 313 tests / 1296 assertions PASS.
+- [ ] **Checkpoint berikutnya:** FE Admin Panel + transfer antarlokasi, retur,
+      laporan stok.
 - [ ] Ditunda: purchase order, supplier, multi-satuan, BOM/resep, konsumsi bahan
       baku, refund/retur otomatis.
-- [ ] Keputusan store lifecycle (hard-delete store dengan histori) — lihat audit §6.
+- [ ] Keputusan store lifecycle: akses baca histori store nonaktif — lihat
+      `docs/store-lifecycle.md` §5.
 - [ ] Migrasi inventory belum diterapkan ke DB development (menunggu persetujuan).
 - [ ] Catatan: retail kini dapat mencatat stok via opening/receipt.
 

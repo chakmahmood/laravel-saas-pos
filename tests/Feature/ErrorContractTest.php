@@ -61,4 +61,52 @@ class ErrorContractTest extends TestCase
                 'code' => 'forbidden',
             ]);
     }
+
+    public function test_missing_token_returns_a_coded_unauthenticated(): void
+    {
+        $this->getJson('/api/categories')
+            ->assertUnauthorized()
+            ->assertExactJson([
+                'message' => 'Tidak terautentikasi.',
+                'code' => 'unauthenticated',
+            ]);
+    }
+
+    public function test_invalid_token_returns_a_coded_unauthenticated(): void
+    {
+        $this->getJson('/api/categories', ['Authorization' => 'Bearer not-a-real-token'])
+            ->assertUnauthorized()
+            ->assertExactJson([
+                'message' => 'Tidak terautentikasi.',
+                'code' => 'unauthenticated',
+            ]);
+    }
+
+    public function test_validation_error_has_a_stable_code_and_errors(): void
+    {
+        [$owner, $store] = $this->createOwnerWithStore();
+        $token = $this->issueToken($owner, $store);
+
+        $response = $this->withHeaders($this->bearer($token))
+            ->postJson('/api/categories', []);
+
+        $response->assertUnprocessable()
+            ->assertJsonPath('code', 'validation_error')
+            ->assertJsonValidationErrors('name');
+    }
+
+    public function test_rate_limit_error_is_coded_and_does_not_leak_a_trace(): void
+    {
+        for ($i = 0; $i < 5; $i++) {
+            $this->postJson('/api/auth/login', ['email' => 'probe@example.com', 'password' => 'x']);
+        }
+
+        $response = $this->postJson('/api/auth/login', ['email' => 'probe@example.com', 'password' => 'x']);
+
+        $response->assertStatus(429)
+            ->assertExactJson([
+                'message' => 'Terlalu banyak permintaan. Silakan coba lagi nanti.',
+                'code' => 'too_many_requests',
+            ]);
+    }
 }

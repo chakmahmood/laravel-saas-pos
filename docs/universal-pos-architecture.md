@@ -4,7 +4,7 @@
 > Setiap bagian ditandai **Sudah diimplementasikan** atau **Rencana** agar
 > tidak ada asumsi yang disalahartikan sebagai kode yang sudah ada.
 
-Versi terakhir audit: 2026-10-10 (Phase 3B Checkpoint 4 — Stock In).
+Versi terakhir audit: 2026-10-10 (Phase 3B Checkpoint 6 — FE Readiness).
 
 ---
 
@@ -703,8 +703,14 @@ Detail per fase ada di `docs/universal-pos-roadmap.md`.
    ledger **read-only**, provisioning terhubung ke registrasi store, proteksi
    delete item/lokasi. **Checkpoint 4 (selesai):** konfigurasi `tracks_stock`
    via API item, opening stock, receipt, dan adjustment (owner/admin, idempotent)
-   (`docs/inventory-design.md`, `docs/inventory-api.md`). Transfer, retur,
-   purchase order, supplier, multi-satuan, BOM menyusul.
+   (`docs/inventory-design.md`, `docs/inventory-api.md`).
+   **Checkpoint 5 (selesai):** audit backend, hardening, rate limiting auth,
+   kontrak error aman (`docs/backend-readiness-audit.md`). **Checkpoint 6
+   (selesai):** OpenAPI 3.1 (`docs/api/openapi.yaml`), FE integration guide
+   (`docs/api/frontend-integration-guide.md`), kebijakan store lifecycle
+   (`docs/store-lifecycle.md`), deployment checklist
+   (`docs/production-deployment-checklist.md`); standarisasi error 401/422/429.
+   Transfer, retur, purchase order, supplier, multi-satuan, BOM menyusul.
    **Sales reports dipindah ke Phase 3C** (lihat `docs/universal-pos-roadmap.md`).
 6. **Phase 4+:** Modul industri (F&B, laundry, servis, salon) dan
    varian/modifier/paket sesuai prioritas bisnis.

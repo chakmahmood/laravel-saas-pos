@@ -1,0 +1,1382 @@
+openapi: 3.1.0
+info:
+  title: Universal POS SaaS API
+  version: "0.2.0"
+  description: |
+    API backend Universal POS SaaS (Laravel 13 + Sanctum), multi-tenant per
+    store. Semua endpoint bisnis memerlukan token Bearer dan konteks store aktif.
+
+    Konvensi:
+    - Uang = integer minor unit (rupiah bulat).
+    - Kuantitas = string desimal 3 angka (`"1.125"`) untuk order/inventory.
+    - Tanggal/waktu = ISO-8601 UTC (`...Z`) atau `null`.
+    - Katalog item: id numerik. ID resource milik tenant lain => 404.
+    - Semua error JSON memiliki `message` dan (kecuali 500) `code` stabil.
+servers:
+  - url: /api
+    description: API root
+security:
+  - bearerAuth: []
+tags:
+  - name: Auth
+  - name: Current store
+  - name: Categories
+  - name: Items
+  - name: Customers
+  - name: Orders
+  - name: Payments
+  - name: Cash sessions
+  - name: Inventory
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: Sanctum
+  parameters:
+    PerPage:
+      name: per_page
+      in: query
+      required: false
+      schema: { type: integer, minimum: 1, maximum: 100, default: 15 }
+    Page:
+      name: page
+      in: query
+      required: false
+      schema: { type: integer, minimum: 1, default: 1 }
+    Direction:
+      name: direction
+      in: query
+      required: false
+      schema: { type: string, enum: [asc, desc], default: asc }
+  responses:
+    Unauthenticated:
+      description: Token tidak ada / tidak valid / kedaluwarsa.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/AuthenticationError' }
+          example: { message: Tidak terautentikasi., code: unauthenticated }
+    Forbidden:
+      description: Tidak diizinkan (role atau capability).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { message: Akses ditolak., code: forbidden }
+    NotFound:
+      description: Resource tidak ada pada scope tenant aktif.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { message: Sumber daya tidak ditemukan., code: not_found }
+    ValidationError:
+      description: Validasi payload/query gagal.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ValidationError' }
+          example:
+            message: The name field is required.
+            code: validation_error
+            errors: { name: [The name field is required.] }
+    BusinessConflict:
+      description: Konflik state bisnis.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { message: Stok tidak mencukupi untuk salah satu item., code: insufficient_stock }
+    TooManyRequests:
+      description: Rate limit terlampaui.
+      headers:
+        Retry-After:
+          schema: { type: integer }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { message: Terlalu banyak permintaan. Silakan coba lagi nanti., code: too_many_requests }
+  schemas:
+    Error:
+      type: object
+      required: [message, code]
+      properties:
+        message: { type: string }
+        code: { type: string }
+    AuthenticationError:
+      type: object
+      required: [message, code]
+      properties:
+        message: { type: string }
+        code: { type: string, enum: [unauthenticated, token_required, current_store_not_selected, current_store_unavailable] }
+    ValidationError:
+      type: object
+      required: [message, code, errors]
+      properties:
+        message: { type: string }
+        code: { type: string, enum: [validation_error] }
+        errors:
+          type: object
+          additionalProperties:
+            type: array
+            items: { type: string }
+    MessageResponse:
+      type: object
+      required: [message]
+      properties:
+        message: { type: string }
+    StoreRef:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        slug: { type: string }
+        role: { $ref: '#/components/schemas/StoreRole' }
+        business_type: { $ref: '#/components/schemas/BusinessType' }
+        is_active: { type: boolean }
+    Category:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        description: { type: [string, "null"] }
+        is_active: { type: boolean }
+        created_at: { type: [string, "null"], format: date-time }
+        updated_at: { type: [string, "null"], format: date-time }
+    Item:
+      type: object
+      properties:
+        id: { type: integer }
+        category_id: { type: [integer, "null"] }
+        name: { type: string }
+        type: { $ref: '#/components/schemas/ItemType' }
+        sku: { type: [string, "null"] }
+        barcode: { type: [string, "null"] }
+        description: { type: [string, "null"] }
+        cost_price: { type: [integer, "null"] }
+        selling_price: { type: integer }
+        unit: { type: string }
+        is_active: { type: boolean }
+        tracks_stock: { type: boolean }
+        created_at: { type: [string, "null"], format: date-time }
+        updated_at: { type: [string, "null"], format: date-time }
+    Customer:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        phone: { type: [string, "null"] }
+        email: { type: [string, "null"] }
+        address: { type: [string, "null"] }
+        notes: { type: [string, "null"] }
+        created_at: { type: [string, "null"], format: date-time }
+        updated_at: { type: [string, "null"], format: date-time }
+    OrderItem:
+      type: object
+      properties:
+        id: { type: integer }
+        item_id: { type: [integer, "null"] }
+        item_name: { type: string }
+        item_sku: { type: [string, "null"] }
+        item_type: { $ref: '#/components/schemas/ItemType' }
+        unit: { type: string }
+        quantity: { type: string, description: desimal 3 angka, contoh "1.125" }
+        unit_price: { type: integer }
+        line_subtotal: { type: integer }
+        discount_amount: { type: integer }
+        line_total: { type: integer }
+        notes: { type: [string, "null"] }
+    Order:
+      type: object
+      properties:
+        id: { type: integer }
+        order_number: { type: string }
+        customer_id: { type: [integer, "null"] }
+        cashier_id: { type: [integer, "null"] }
+        subtotal: { type: integer }
+        discount_amount: { type: integer }
+        tax_amount: { type: integer }
+        total_amount: { type: integer }
+        paid_amount: { type: integer }
+        payment_status: { $ref: '#/components/schemas/PaymentStatus' }
+        fulfillment_status: { $ref: '#/components/schemas/FulfillmentStatus' }
+        notes: { type: [string, "null"] }
+        placed_at: { type: [string, "null"], format: date-time }
+        completed_at: { type: [string, "null"], format: date-time }
+        cancelled_at: { type: [string, "null"], format: date-time }
+        cancel_reason: { type: [string, "null"] }
+        customer: { oneOf: [{ $ref: '#/components/schemas/Customer' }, { type: "null" }] }
+        items: { type: array, items: { $ref: '#/components/schemas/OrderItem' } }
+        payments: { type: array, items: { $ref: '#/components/schemas/Payment' } }
+        created_at: { type: [string, "null"], format: date-time }
+        updated_at: { type: [string, "null"], format: date-time }
+    Payment:
+      type: object
+      properties:
+        id: { type: integer }
+        order_id: { type: integer }
+        payment_method: { $ref: '#/components/schemas/PaymentMethod' }
+        amount: { type: integer }
+        status: { $ref: '#/components/schemas/PaymentRecordStatus' }
+        reference_number: { type: [string, "null"] }
+        notes: { type: [string, "null"] }
+        paid_at: { type: [string, "null"], format: date-time }
+        recorded_by: { type: [integer, "null"] }
+        voided_at: { type: [string, "null"], format: date-time }
+        voided_by: { type: [integer, "null"] }
+        void_reason: { type: [string, "null"] }
+        created_at: { type: [string, "null"], format: date-time }
+        updated_at: { type: [string, "null"], format: date-time }
+    CashSession:
+      type: object
+      properties:
+        id: { type: integer }
+        cashier_id: { type: [integer, "null"] }
+        status: { $ref: '#/components/schemas/CashSessionStatus' }
+        opening_cash: { type: integer }
+        cash_in_total: { type: integer }
+        cash_out_total: { type: integer }
+        cash_sales_total: { type: integer }
+        expected_cash: { type: integer }
+        actual_cash: { type: [integer, "null"] }
+        difference: { type: [integer, "null"] }
+        opened_at: { type: [string, "null"], format: date-time }
+        closed_at: { type: [string, "null"], format: date-time }
+        opening_notes: { type: [string, "null"] }
+        closing_notes: { type: [string, "null"] }
+        created_at: { type: [string, "null"], format: date-time }
+        updated_at: { type: [string, "null"], format: date-time }
+    CashMovement:
+      type: object
+      properties:
+        id: { type: integer }
+        cash_session_id: { type: integer }
+        user_id: { type: [integer, "null"] }
+        type: { $ref: '#/components/schemas/CashMovementType' }
+        amount: { type: integer }
+        reason: { type: string }
+        created_at: { type: [string, "null"], format: date-time }
+    StockLocation:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        code: { type: [string, "null"] }
+        type: { $ref: '#/components/schemas/StockLocationType' }
+        is_default: { type: boolean }
+        is_active: { type: boolean }
+        created_at: { type: [string, "null"], format: date-time }
+        updated_at: { type: [string, "null"], format: date-time }
+    StockBalance:
+      type: object
+      properties:
+        id: { type: integer }
+        stock_location_id: { type: integer }
+        item_id: { type: integer }
+        quantity_on_hand: { type: string }
+        quantity_reserved: { type: string }
+        quantity_available: { type: string }
+        updated_at: { type: [string, "null"], format: date-time }
+        item: { oneOf: [{ $ref: '#/components/schemas/Item' }, { type: "null" }] }
+        stock_location: { oneOf: [{ $ref: '#/components/schemas/StockLocation' }, { type: "null" }] }
+    StockMovement:
+      type: object
+      properties:
+        id: { type: integer }
+        item_id: { type: integer }
+        stock_location_id: { type: integer }
+        type: { $ref: '#/components/schemas/StockMovementType' }
+        quantity: { type: string }
+        unit_cost: { type: [integer, "null"] }
+        order_id: { type: [integer, "null"] }
+        order_item_id: { type: [integer, "null"] }
+        idempotency_key: { type: [string, "null"] }
+        note: { type: [string, "null"] }
+        occurred_at: { type: [string, "null"], format: date-time }
+        created_at: { type: [string, "null"], format: date-time }
+        item: { oneOf: [{ $ref: '#/components/schemas/Item' }, { type: "null" }] }
+        stock_location: { oneOf: [{ $ref: '#/components/schemas/StockLocation' }, { type: "null" }] }
+    ItemStock:
+      type: object
+      properties:
+        item_id: { type: integer }
+        name: { type: string }
+        unit: { type: string }
+        tracks_stock: { type: boolean }
+        balances: { type: array, items: { $ref: '#/components/schemas/StockBalance' } }
+    StockMutation:
+      type: object
+      properties:
+        movement: { oneOf: [{ $ref: '#/components/schemas/StockMovement' }, { type: "null" }] }
+        balance: { $ref: '#/components/schemas/StockBalance' }
+        idempotent: { type: boolean }
+        no_op: { type: boolean }
+    PaginationLinks:
+      type: object
+      properties:
+        first: { type: [string, "null"] }
+        last: { type: [string, "null"] }
+        prev: { type: [string, "null"] }
+        next: { type: [string, "null"] }
+    PaginationMetaLink:
+      type: object
+      properties:
+        url: { type: [string, "null"] }
+        label: { type: string }
+        active: { type: boolean }
+    PaginationMeta:
+      type: object
+      properties:
+        current_page: { type: integer }
+        from: { type: [integer, "null"] }
+        last_page: { type: integer }
+        links: { type: array, items: { $ref: '#/components/schemas/PaginationMetaLink' } }
+        path: { type: string }
+        per_page: { type: integer }
+        to: { type: [integer, "null"] }
+        total: { type: integer }
+    ItemType:
+      type: string
+      enum: [product, service, menu, package]
+    PaymentMethod:
+      type: string
+      enum: [cash, bank_transfer, card, e_wallet, other]
+    PaymentRecordStatus:
+      type: string
+      enum: [completed, voided]
+    PaymentStatus:
+      type: string
+      enum: [unpaid, partially_paid, paid, refunded]
+    FulfillmentStatus:
+      type: string
+      enum: [pending, processing, completed, cancelled]
+    CashSessionStatus:
+      type: string
+      enum: [open, closed]
+    CashMovementType:
+      type: string
+      enum: [cash_in, cash_out]
+    StockLocationType:
+      type: string
+      enum: [warehouse, outlet, other]
+    StockMovementType:
+      type: string
+      enum: [opening, purchase_in, sale_out, adjustment_in, adjustment_out, transfer_in, transfer_out, return_in, return_out, reservation, reservation_release, reversal]
+    BusinessType:
+      type: string
+      enum: [retail, restaurant, laundry, repair, salon, other]
+    StoreRole:
+      type: string
+      enum: [owner, admin, cashier]
+paths:
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Registrasi user + store pertama
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, password, password_confirmation, store_name, store_slug]
+              properties:
+                name: { type: string, maxLength: 100 }
+                email: { type: string, format: email, maxLength: 255 }
+                password: { type: string, minLength: 8 }
+                password_confirmation: { type: string }
+                store_name: { type: string, maxLength: 150 }
+                store_slug: { type: string, maxLength: 100 }
+                business_type: { $ref: '#/components/schemas/BusinessType' }
+      responses:
+        '201':
+          description: Registrasi berhasil (membuat store, membership owner, free subscription, token).
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Login dan dapatkan token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+      responses:
+        '200': { description: Login berhasil (token). }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Cabut token saat ini
+      responses:
+        '200': { description: Logout berhasil. }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+  /me:
+    get:
+      tags: [Current store]
+      summary: User saat ini + daftar store yang dapat diakses
+      responses:
+        '200': { description: Data user dan stores. }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+  /current-store:
+    get:
+      tags: [Current store]
+      summary: Store aktif pada token saat ini
+      responses:
+        '200': { description: current_store atau null. }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+    put:
+      tags: [Current store]
+      summary: Ubah store aktif (per token)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [store_id]
+              properties:
+                store_id: { type: integer }
+      responses:
+        '200': { description: Store aktif diubah. }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /categories:
+    get:
+      tags: [Categories]
+      summary: List kategori
+      parameters:
+        - { name: search, in: query, schema: { type: string, maxLength: 100 } }
+        - { name: is_active, in: query, schema: { type: string, enum: ['true','false','1','0'] } }
+        - { name: sort, in: query, schema: { type: string, enum: [name, created_at] } }
+        - { $ref: '#/components/parameters/Direction' }
+        - { $ref: '#/components/parameters/PerPage' }
+        - { $ref: '#/components/parameters/Page' }
+      responses:
+        '200':
+          description: Daftar kategori (paginated).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Category' } }
+                  links: { $ref: '#/components/schemas/PaginationLinks' }
+                  meta: { $ref: '#/components/schemas/PaginationMeta' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Categories]
+      summary: Buat kategori
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, maxLength: 100 }
+                description: { type: [string, "null"], maxLength: 1000 }
+                is_active: { type: boolean }
+      responses:
+        '201': { description: Kategori dibuat. }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /categories/{category}:
+    parameters:
+      - { name: category, in: path, required: true, schema: { type: integer } }
+    get:
+      tags: [Categories]
+      summary: Detail kategori
+      responses:
+        '200': { description: Detail kategori. }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Categories]
+      summary: Ganti kategori (name wajib)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, maxLength: 100 }
+                description: { type: [string, "null"] }
+                is_active: { type: boolean }
+      responses:
+        '200': { description: Kategori diperbarui. }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    patch:
+      tags: [Categories]
+      summary: Update sebagian kategori
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, maxLength: 100 }
+                description: { type: [string, "null"] }
+                is_active: { type: boolean }
+      responses:
+        '200': { description: Kategori diperbarui. }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      tags: [Categories]
+      summary: Hapus kategori (409 bila dipakai item)
+      responses:
+        '200': { description: Kategori dihapus. }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Kategori masih dipakai item.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { message: Kategori masih digunakan oleh item dan tidak dapat dihapus., code: category_in_use }
+  /items:
+    get:
+      tags: [Items]
+      summary: List item
+      parameters:
+        - { name: search, in: query, schema: { type: string, maxLength: 100 } }
+        - { name: type, in: query, schema: { $ref: '#/components/schemas/ItemType' } }
+        - { name: category_id, in: query, schema: { type: integer, minimum: 1 } }
+        - { name: is_active, in: query, schema: { type: string, enum: ['true','false','1','0'] } }
+        - { name: sort, in: query, schema: { type: string, enum: [name, created_at, selling_price] } }
+        - { $ref: '#/components/parameters/Direction' }
+        - { $ref: '#/components/parameters/PerPage' }
+        - { $ref: '#/components/parameters/Page' }
+      responses:
+        '200':
+          description: Daftar item (paginated).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Item' } }
+                  links: { $ref: '#/components/schemas/PaginationLinks' }
+                  meta: { $ref: '#/components/schemas/PaginationMeta' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Items]
+      summary: Buat item
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, type, selling_price]
+              properties:
+                name: { type: string, maxLength: 150 }
+                type: { $ref: '#/components/schemas/ItemType' }
+                category_id: { type: [integer, "null"] }
+                sku: { type: [string, "null"], maxLength: 64 }
+                barcode: { type: [string, "null"], maxLength: 64 }
+                description: { type: [string, "null"], maxLength: 2000 }
+                cost_price: { type: [integer, "null"], minimum: 0 }
+                selling_price: { type: integer, minimum: 0 }
+                unit: { type: [string, "null"], maxLength: 20 }
+                is_active: { type: boolean }
+                tracks_stock: { type: boolean, description: "true hanya bila store mendukung inventory" }
+      responses:
+        '201': { description: Item dibuat. }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /items/{item}:
+    parameters:
+      - { name: item, in: path, required: true, schema: { type: integer } }
+    get:
+      tags: [Items]
+      summary: Detail item
+      responses:
+        '200': { description: Detail item. }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Items]
+      summary: Ganti item (name/type/selling_price wajib)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, type, selling_price]
+              properties:
+                name: { type: string, maxLength: 150 }
+                type: { $ref: '#/components/schemas/ItemType' }
+                category_id: { type: [integer, "null"] }
+                sku: { type: [string, "null"] }
+                barcode: { type: [string, "null"] }
+                description: { type: [string, "null"] }
+                cost_price: { type: [integer, "null"] }
+                selling_price: { type: integer, minimum: 0 }
+                unit: { type: [string, "null"] }
+                is_active: { type: boolean }
+                tracks_stock: { type: boolean }
+      responses:
+        '200': { description: Item diperbarui. }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Tidak dapat berhenti melacak stok karena ada histori.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { message: Item tidak dapat berhenti melacak stok karena sudah memiliki saldo atau riwayat stok., code: item_inventory_in_use }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    patch:
+      tags: [Items]
+      summary: Update sebagian item
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                type: { $ref: '#/components/schemas/ItemType' }
+                category_id: { type: [integer, "null"] }
+                sku: { type: [string, "null"] }
+                barcode: { type: [string, "null"] }
+                description: { type: [string, "null"] }
+                cost_price: { type: [integer, "null"] }
+                selling_price: { type: integer }
+                unit: { type: [string, "null"] }
+                is_active: { type: boolean }
+                tracks_stock: { type: boolean }
+      responses:
+        '200': { description: Item diperbarui. }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: item_inventory_in_use }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      tags: [Items]
+      summary: Hapus item (409 bila punya riwayat stok)
+      responses:
+        '200': { description: Item dihapus. }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Item punya riwayat stok.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { message: Item memiliki riwayat stok dan tidak dapat dihapus., code: item_has_stock_history }
+  /items/{item}/stock:
+    get:
+      tags: [Inventory]
+      summary: Saldo stok per item (read-only)
+      parameters:
+        - { name: item, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: Saldo per lokasi.
+          content:
+            application/json:
+              schema: { type: object, properties: { data: { $ref: '#/components/schemas/ItemStock' } } }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Item tidak melacak stok.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { message: Item ini tidak melacak stok., code: inventory_item_not_tracked }
+  /customers:
+    get:
+      tags: [Customers]
+      summary: List pelanggan
+      parameters:
+        - { name: search, in: query, schema: { type: string, maxLength: 100 } }
+        - { name: sort, in: query, schema: { type: string, enum: [name, created_at] } }
+        - { $ref: '#/components/parameters/Direction' }
+        - { $ref: '#/components/parameters/PerPage' }
+        - { $ref: '#/components/parameters/Page' }
+      responses:
+        '200':
+          description: Daftar pelanggan (paginated).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Customer' } }
+                  links: { $ref: '#/components/schemas/PaginationLinks' }
+                  meta: { $ref: '#/components/schemas/PaginationMeta' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Customers]
+      summary: Buat pelanggan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, maxLength: 150 }
+                phone: { type: [string, "null"], maxLength: 30 }
+                email: { type: [string, "null"], format: email, maxLength: 150 }
+                address: { type: [string, "null"], maxLength: 1000 }
+                notes: { type: [string, "null"], maxLength: 1000 }
+      responses:
+        '201': { description: Pelanggan dibuat. }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /customers/{customer}:
+    parameters:
+      - { name: customer, in: path, required: true, schema: { type: integer } }
+    get:
+      tags: [Customers]
+      summary: Detail pelanggan
+      responses:
+        '200': { description: Detail pelanggan. }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Customers]
+      summary: Ganti pelanggan (name wajib)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+                phone: { type: [string, "null"] }
+                email: { type: [string, "null"] }
+                address: { type: [string, "null"] }
+                notes: { type: [string, "null"] }
+      responses:
+        '200': { description: Pelanggan diperbarui. }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    patch:
+      tags: [Customers]
+      summary: Update sebagian pelanggan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                phone: { type: [string, "null"] }
+                email: { type: [string, "null"] }
+                address: { type: [string, "null"] }
+                notes: { type: [string, "null"] }
+      responses:
+        '200': { description: Pelanggan diperbarui. }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      tags: [Customers]
+      summary: Arsipkan pelanggan (soft delete)
+      responses:
+        '200': { description: Pelanggan diarsipkan. }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /orders:
+    get:
+      tags: [Orders]
+      summary: List order
+      parameters:
+        - { name: search, in: query, schema: { type: string, maxLength: 100 } }
+        - { name: payment_status, in: query, schema: { $ref: '#/components/schemas/PaymentStatus' } }
+        - { name: fulfillment_status, in: query, schema: { $ref: '#/components/schemas/FulfillmentStatus' } }
+        - { name: customer_id, in: query, schema: { type: integer, minimum: 1 } }
+        - { name: cashier_id, in: query, schema: { type: integer, minimum: 1 } }
+        - { name: date_from, in: query, schema: { type: string, format: date } }
+        - { name: date_to, in: query, schema: { type: string, format: date } }
+        - { name: sort, in: query, schema: { type: string, enum: [placed_at, created_at, order_number, total_amount] } }
+        - { $ref: '#/components/parameters/Direction' }
+        - { $ref: '#/components/parameters/PerPage' }
+        - { $ref: '#/components/parameters/Page' }
+      responses:
+        '200':
+          description: Daftar order (paginated).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Order' } }
+                  links: { $ref: '#/components/schemas/PaginationLinks' }
+                  meta: { $ref: '#/components/schemas/PaginationMeta' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Orders]
+      summary: Buat order (total dihitung server)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                customer_id: { type: [integer, "null"] }
+                tax_amount: { type: integer, minimum: 0 }
+                notes: { type: [string, "null"], maxLength: 1000 }
+                items:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    required: [item_id, quantity]
+                    properties:
+                      item_id: { type: integer }
+                      quantity: { type: number, exclusiveMinimum: 0, maximum: 999999 }
+                      discount_amount: { type: integer, minimum: 0 }
+      responses:
+        '201': { description: Order dibuat. }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: Konflik inventory (mis. insufficient_stock / inventory_not_supported / stock_location_unavailable).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /orders/{order}:
+    parameters:
+      - { name: order, in: path, required: true, schema: { type: integer } }
+    get:
+      tags: [Orders]
+      summary: Detail order (items, customer, payments)
+      responses:
+        '200': { description: Detail order. }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /orders/{order}/fulfillment:
+    parameters:
+      - { name: order, in: path, required: true, schema: { type: integer } }
+    patch:
+      tags: [Orders]
+      summary: Ubah fulfillment status (cancel = owner/admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fulfillment_status]
+              properties:
+                fulfillment_status: { $ref: '#/components/schemas/FulfillmentStatus' }
+                reason: { type: [string, "null"], maxLength: 255 }
+      responses:
+        '200': { description: Status diperbarui. }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Order masih punya pembayaran aktif / konflik inventory.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /orders/{order}/payments:
+    parameters:
+      - { name: order, in: path, required: true, schema: { type: integer } }
+    get:
+      tags: [Payments]
+      summary: List pembayaran order
+      responses:
+        '200':
+          description: Daftar pembayaran.
+          content:
+            application/json:
+              schema: { type: object, properties: { data: { type: array, items: { $ref: '#/components/schemas/Payment' } } } }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [Payments]
+      summary: Catat pembayaran manual
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [payment_method, amount]
+              properties:
+                payment_method: { $ref: '#/components/schemas/PaymentMethod' }
+                amount: { type: integer, minimum: 1 }
+                reference_number: { type: [string, "null"], maxLength: 100 }
+                notes: { type: [string, "null"], maxLength: 1000 }
+                paid_at: { type: [string, "null"], format: date-time }
+      responses:
+        '201': { description: Pembayaran dicatat. }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Order dibatalkan atau shift kas belum dibuka (tunai).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /payments/{payment}:
+    parameters:
+      - { name: payment, in: path, required: true, schema: { type: integer } }
+    get:
+      tags: [Payments]
+      summary: Detail pembayaran
+      responses:
+        '200': { description: Detail pembayaran. }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /payments/{payment}/void:
+    parameters:
+      - { name: payment, in: path, required: true, schema: { type: integer } }
+    post:
+      tags: [Payments]
+      summary: Batalkan pembayaran (owner/admin; tunai pada shift tertutup ditolak)
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: [string, "null"], maxLength: 255 }
+      responses:
+        '200': { description: Pembayaran dibatalkan. }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Sudah dibatalkan / shift tertutup.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /cash-sessions/current:
+    get:
+      tags: [Cash sessions]
+      summary: Shift terbuka user saat ini (atau null)
+      responses:
+        '200': { description: current_cash_session. }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+  /cash-sessions:
+    get:
+      tags: [Cash sessions]
+      summary: List shift (cashier hanya melihat miliknya)
+      parameters:
+        - { name: cashier_id, in: query, schema: { type: integer, minimum: 1 } }
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/CashSessionStatus' } }
+        - { name: date_from, in: query, schema: { type: string, format: date } }
+        - { name: date_to, in: query, schema: { type: string, format: date } }
+        - { $ref: '#/components/parameters/PerPage' }
+        - { $ref: '#/components/parameters/Page' }
+      responses:
+        '200':
+          description: Daftar shift (paginated).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/CashSession' } }
+                  links: { $ref: '#/components/schemas/PaginationLinks' }
+                  meta: { $ref: '#/components/schemas/PaginationMeta' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /cash-sessions/open:
+    post:
+      tags: [Cash sessions]
+      summary: Buka shift kas
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [opening_cash]
+              properties:
+                opening_cash: { type: integer, minimum: 0 }
+                opening_notes: { type: [string, "null"], maxLength: 1000 }
+      responses:
+        '201': { description: Shift dibuka. }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: Sudah ada shift terbuka.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { message: Anda masih memiliki shift yang terbuka di toko ini., code: cash_session_already_open }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /cash-sessions/{cashSession}:
+    parameters:
+      - { name: cashSession, in: path, required: true, schema: { type: integer } }
+    get:
+      tags: [Cash sessions]
+      summary: Detail shift
+      responses:
+        '200': { description: Detail shift. }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /cash-sessions/{cashSession}/close:
+    parameters:
+      - { name: cashSession, in: path, required: true, schema: { type: integer } }
+    post:
+      tags: [Cash sessions]
+      summary: Tutup shift dan simpan rekonsiliasi
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [actual_cash]
+              properties:
+                actual_cash: { type: integer, minimum: 0 }
+                closing_notes: { type: [string, "null"], maxLength: 1000 }
+      responses:
+        '200': { description: Shift ditutup. }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Shift sudah ditutup.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { message: Shift ini sudah ditutup., code: cash_session_already_closed }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /cash-sessions/{cashSession}/movements:
+    parameters:
+      - { name: cashSession, in: path, required: true, schema: { type: integer } }
+    get:
+      tags: [Cash sessions]
+      summary: List pergerakan kas
+      responses:
+        '200':
+          description: Daftar pergerakan.
+          content:
+            application/json:
+              schema: { type: object, properties: { data: { type: array, items: { $ref: '#/components/schemas/CashMovement' } } } }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [Cash sessions]
+      summary: Catat pergerakan kas (hanya kasir pemilik shift)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type, amount, reason]
+              properties:
+                type: { $ref: '#/components/schemas/CashMovementType' }
+                amount: { type: integer, minimum: 1 }
+                reason: { type: string, maxLength: 255 }
+      responses:
+        '201': { description: Pergerakan dicatat. }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Shift tertutup.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /stock/locations:
+    get:
+      tags: [Inventory]
+      summary: List lokasi stok
+      parameters:
+        - { name: search, in: query, schema: { type: string, maxLength: 100 } }
+        - { name: type, in: query, schema: { type: string, maxLength: 20 } }
+        - { name: is_active, in: query, schema: { type: string, enum: ['true','false','1','0'] } }
+        - { name: sort, in: query, schema: { type: string, enum: [name, created_at] } }
+        - { $ref: '#/components/parameters/Direction' }
+        - { $ref: '#/components/parameters/PerPage' }
+        - { $ref: '#/components/parameters/Page' }
+      responses:
+        '200':
+          description: Daftar lokasi (paginated).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/StockLocation' } }
+                  links: { $ref: '#/components/schemas/PaginationLinks' }
+                  meta: { $ref: '#/components/schemas/PaginationMeta' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Inventory]
+      summary: Buat lokasi stok
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, type]
+              properties:
+                name: { type: string, maxLength: 100 }
+                code: { type: [string, "null"], maxLength: 30 }
+                type: { $ref: '#/components/schemas/StockLocationType' }
+                is_active: { type: boolean }
+      responses:
+        '201': { description: Lokasi dibuat. }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /stock/locations/{stockLocation}:
+    parameters:
+      - { name: stockLocation, in: path, required: true, schema: { type: integer } }
+    get:
+      tags: [Inventory]
+      summary: Detail lokasi stok
+      responses:
+        '200': { description: Detail lokasi. }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Inventory]
+      summary: Ganti lokasi stok (name/type wajib)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, type]
+              properties:
+                name: { type: string, maxLength: 100 }
+                code: { type: [string, "null"], maxLength: 30 }
+                type: { $ref: '#/components/schemas/StockLocationType' }
+                is_active: { type: boolean }
+      responses:
+        '200': { description: Lokasi diperbarui. }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    patch:
+      tags: [Inventory]
+      summary: Update sebagian lokasi stok
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                code: { type: [string, "null"] }
+                type: { $ref: '#/components/schemas/StockLocationType' }
+                is_active: { type: boolean }
+      responses:
+        '200': { description: Lokasi diperbarui. }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      tags: [Inventory]
+      summary: Hapus lokasi stok (dengan proteksi)
+      responses:
+        '200': { description: Lokasi dihapus. }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Lokasi default atau masih dirujuk.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                default: { value: { message: Lokasi default tidak dapat dihapus., code: default_stock_location_protected } }
+                in_use: { value: { message: Lokasi stok masih digunakan dan tidak dapat dihapus., code: stock_location_in_use } }
+  /stock/balances:
+    get:
+      tags: [Inventory]
+      summary: List saldo stok (read-only)
+      parameters:
+        - { name: item_id, in: query, schema: { type: integer, minimum: 1 } }
+        - { name: stock_location_id, in: query, schema: { type: integer, minimum: 1 } }
+        - { name: sort, in: query, schema: { type: string, enum: [updated_at, item_id, quantity_on_hand] } }
+        - { $ref: '#/components/parameters/Direction' }
+        - { $ref: '#/components/parameters/PerPage' }
+        - { $ref: '#/components/parameters/Page' }
+      responses:
+        '200':
+          description: Daftar saldo (paginated).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/StockBalance' } }
+                  links: { $ref: '#/components/schemas/PaginationLinks' }
+                  meta: { $ref: '#/components/schemas/PaginationMeta' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /stock/movements:
+    get:
+      tags: [Inventory]
+      summary: List ledger movement (read-only)
+      parameters:
+        - { name: item_id, in: query, schema: { type: integer, minimum: 1 } }
+        - { name: stock_location_id, in: query, schema: { type: integer, minimum: 1 } }
+        - { name: type, in: query, schema: { $ref: '#/components/schemas/StockMovementType' } }
+        - { name: order_id, in: query, schema: { type: integer, minimum: 1 } }
+        - { name: date_from, in: query, schema: { type: string, format: date } }
+        - { name: date_to, in: query, schema: { type: string, format: date } }
+        - { name: sort, in: query, schema: { type: string, enum: [occurred_at, created_at, id] } }
+        - { $ref: '#/components/parameters/Direction' }
+        - { $ref: '#/components/parameters/PerPage' }
+        - { $ref: '#/components/parameters/Page' }
+      responses:
+        '200':
+          description: Daftar movement (paginated).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/StockMovement' } }
+                  links: { $ref: '#/components/schemas/PaginationLinks' }
+                  meta: { $ref: '#/components/schemas/PaginationMeta' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /stock/opening-balances:
+    post:
+      tags: [Inventory]
+      summary: Catat saldo awal (owner/admin; idempotent)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [stock_location_id, item_id, quantity, idempotency_key]
+              properties:
+                stock_location_id: { type: integer, minimum: 1 }
+                item_id: { type: integer, minimum: 1 }
+                quantity: { type: string, description: "> 0, maks 3 desimal", example: "10.000" }
+                idempotency_key: { type: string, maxLength: 120 }
+                note: { type: [string, "null"], maxLength: 255 }
+      responses:
+        '201': { description: Saldo awal dicatat. }
+        '200': { description: Retry idempotent (idempotent=true). }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: opening_stock_conflict / idempotency_conflict / inventory_item_not_tracked / stock_invalid_quantity / stock_inconsistent.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /stock/receipts:
+    post:
+      tags: [Inventory]
+      summary: Catat barang masuk (owner/admin; idempotent)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [stock_location_id, item_id, quantity, idempotency_key]
+              properties:
+                stock_location_id: { type: integer, minimum: 1 }
+                item_id: { type: integer, minimum: 1 }
+                quantity: { type: string, description: "> 0, maks 3 desimal" }
+                idempotency_key: { type: string, maxLength: 120 }
+                reference: { type: [string, "null"], maxLength: 255 }
+      responses:
+        '201': { description: Barang masuk dicatat. }
+        '200': { description: Retry idempotent. }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: idempotency_conflict / inventory_item_not_tracked / stock_invalid_quantity / stock_inconsistent.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /stock/adjustments:
+    post:
+      tags: [Inventory]
+      summary: Koreksi stok hasil hitung fisik (owner/admin; idempotent)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [stock_location_id, item_id, counted_quantity, reason, idempotency_key]
+              properties:
+                stock_location_id: { type: integer, minimum: 1 }
+                item_id: { type: integer, minimum: 1 }
+                counted_quantity: { type: string, description: ">= 0, maks 3 desimal" }
+                reason: { type: string, maxLength: 255 }
+                idempotency_key: { type: string, maxLength: 120 }
+      responses:
+        '201': { description: Penyesuaian dicatat (adjustment_in/out). }
+        '200': { description: Retry idempotent atau no-op (delta 0, no_op=true). }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: adjustment_below_reserved / idempotency_conflict / inventory_item_not_tracked / stock_invalid_quantity / stock_inconsistent.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422': { $ref: '#/components/responses/ValidationError' }
