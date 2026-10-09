@@ -20,6 +20,7 @@ class Payment extends Model
     protected $fillable = [
         'store_id',
         'order_id',
+        'cash_session_id',
         'payment_method',
         'amount',
         'status',
@@ -51,6 +52,14 @@ class Payment extends Model
     public function order(): BelongsTo
     {
         return $this->belongsTo(Order::class);
+    }
+
+    /**
+     * Cashier shift this payment was attributed to (cash payments only).
+     */
+    public function cashSession(): BelongsTo
+    {
+        return $this->belongsTo(CashSession::class);
     }
 
     public function recordedBy(): BelongsTo

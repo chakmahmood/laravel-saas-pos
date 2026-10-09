@@ -2,11 +2,13 @@
 
 namespace App\Providers;
 
+use App\Models\CashSession;
 use App\Models\Category;
 use App\Models\Customer;
 use App\Models\Item;
 use App\Models\Order;
 use App\Models\Payment;
+use App\Policies\CashSessionPolicy;
 use App\Policies\CategoryPolicy;
 use App\Policies\CustomerPolicy;
 use App\Policies\ItemPolicy;
@@ -35,5 +37,6 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(Customer::class, CustomerPolicy::class);
         Gate::policy(Order::class, OrderPolicy::class);
         Gate::policy(Payment::class, PaymentPolicy::class);
+        Gate::policy(CashSession::class, CashSessionPolicy::class);
     }
 }

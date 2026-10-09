@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\CashSessionController;
 use App\Http\Controllers\Api\CategoryController;
 use App\Http\Controllers\Api\CurrentStoreController;
 use App\Http\Controllers\Api\CustomerController;
@@ -176,6 +177,41 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/payments/{payment}/void', [
             PaymentController::class,
             'void',
+        ]);
+
+        Route::get('/cash-sessions/current', [
+            CashSessionController::class,
+            'current',
+        ]);
+
+        Route::get('/cash-sessions', [
+            CashSessionController::class,
+            'index',
+        ]);
+
+        Route::post('/cash-sessions/open', [
+            CashSessionController::class,
+            'open',
+        ]);
+
+        Route::get('/cash-sessions/{cashSession}', [
+            CashSessionController::class,
+            'show',
+        ]);
+
+        Route::post('/cash-sessions/{cashSession}/close', [
+            CashSessionController::class,
+            'close',
+        ]);
+
+        Route::get('/cash-sessions/{cashSession}/movements', [
+            CashSessionController::class,
+            'movements',
+        ]);
+
+        Route::post('/cash-sessions/{cashSession}/movements', [
+            CashSessionController::class,
+            'storeMovement',
         ]);
     });
 });

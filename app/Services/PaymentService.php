@@ -2,10 +2,13 @@
 
 namespace App\Services;
 
+use App\Enums\CashSessionStatus;
 use App\Enums\FulfillmentStatus;
+use App\Enums\PaymentMethod;
 use App\Enums\PaymentRecordStatus;
 use App\Enums\PaymentStatus;
 use App\Exceptions\OrderConflictException;
+use App\Models\CashSession;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\User;
@@ -15,11 +18,15 @@ use Illuminate\Validation\ValidationException;
 /**
  * Write path for payments (manual recording, no gateway).
  *
- * Recording and voiding lock the order row first, so concurrent payments for
- * the same order are serialized and overpayment cannot slip through on a
- * database that supports row locking (MySQL 8 InnoDB). The order's paid amount
- * and payment status are always recomputed from valid (non-voided) payments;
- * the client never sets them.
+ * Lock ordering is fixed to avoid deadlocks:
+ *
+ *   order -> cash_session -> payment
+ *
+ * `record()` locks the order and (for cash) the cashier's open shift, so a
+ * concurrent close cannot let a cash payment slip in after the shift is
+ * closed, and concurrent payments cannot overpay. `void()` follows the same
+ * order and refuses to void a cash payment that belongs to a closed shift, so a
+ * closed reconciliation is never silently changed.
  */
 class PaymentService
 {
@@ -44,6 +51,30 @@ class PaymentService
                 );
             }
 
+            $isCash = ($data['payment_method'] ?? null) === PaymentMethod::CASH->value;
+
+            /*
+             * A cash payment must be attributed to the recorder's open shift.
+             * Locking the shift row serializes against shift close.
+             */
+            $cashSession = null;
+
+            if ($isCash) {
+                $cashSession = CashSession::query()
+                    ->where('store_id', $locked->store_id)
+                    ->where('cashier_id', $recorder->getKey())
+                    ->where('status', CashSessionStatus::OPEN->value)
+                    ->lockForUpdate()
+                    ->first();
+
+                if ($cashSession === null) {
+                    throw new OrderConflictException(
+                        'Shift kas belum dibuka. Buka shift terlebih dahulu untuk menerima pembayaran tunai.',
+                        'cash_session_required',
+                    );
+                }
+            }
+
             $amount = (int) $data['amount'];
             $activePaid = $locked->activePaidAmount();
             $remaining = max(0, $locked->total_amount - $activePaid);
@@ -56,13 +87,14 @@ class PaymentService
 
             $payment = $locked->payments()->create([
                 'store_id' => $locked->store_id,
+                'cash_session_id' => $cashSession?->getKey(),
                 'payment_method' => $data['payment_method'],
                 'amount' => $amount,
                 'status' => PaymentRecordStatus::COMPLETED,
                 'reference_number' => $data['reference_number'] ?? null,
                 'notes' => $data['notes'] ?? null,
                 'paid_at' => $data['paid_at'] ?? now(),
-                'recorded_by' => $recorder->id,
+                'recorded_by' => $recorder->getKey(),
             ]);
 
             $this->syncPaymentStatus($locked, $recorder, 'Pembayaran dicatat');
@@ -80,6 +112,21 @@ class PaymentService
     public function void(Payment $payment, User $actor, ?string $reason): Payment
     {
         return DB::transaction(function () use ($payment, $actor, $reason) {
+            // Lock in the fixed order: order -> cash_session -> payment.
+            $order = Order::query()
+                ->whereKey($payment->order_id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            $cashSession = null;
+
+            if ($payment->cash_session_id !== null) {
+                $cashSession = CashSession::query()
+                    ->whereKey($payment->cash_session_id)
+                    ->lockForUpdate()
+                    ->first();
+            }
+
             $lockedPayment = Payment::query()
                 ->whereKey($payment->getKey())
                 ->lockForUpdate()
@@ -92,15 +139,21 @@ class PaymentService
                 );
             }
 
-            $order = Order::query()
-                ->whereKey($lockedPayment->order_id)
-                ->lockForUpdate()
-                ->firstOrFail();
+            /*
+             * A cash payment tied to a closed shift must not be voided: it
+             * would silently change a reconciliation that was already counted.
+             */
+            if ($cashSession !== null && $cashSession->status === CashSessionStatus::CLOSED) {
+                throw new OrderConflictException(
+                    'Pembayaran tunai pada shift yang sudah ditutup tidak dapat dibatalkan.',
+                    'cash_session_closed',
+                );
+            }
 
             $lockedPayment->forceFill([
                 'status' => PaymentRecordStatus::VOIDED,
                 'voided_at' => now(),
-                'voided_by' => $actor->id,
+                'voided_by' => $actor->getKey(),
                 'void_reason' => $reason,
             ])->save();
 
@@ -130,7 +183,7 @@ class PaymentService
                 'to_fulfillment_status' => $order->fulfillment_status->value,
                 'from_payment_status' => $previous->value,
                 'to_payment_status' => $status->value,
-                'changed_by' => $actor->id,
+                'changed_by' => $actor->getKey(),
                 'reason' => $reason,
                 'created_at' => now(),
             ]);

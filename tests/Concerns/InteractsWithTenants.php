@@ -2,7 +2,9 @@
 
 namespace Tests\Concerns;
 
+use App\Enums\CashSessionStatus;
 use App\Enums\StoreRole;
+use App\Models\CashSession;
 use App\Models\Plan;
 use App\Models\Store;
 use App\Models\User;
@@ -118,6 +120,27 @@ trait InteractsWithTenants
     {
         return User::factory()->create([
             'password' => Hash::make($password),
+        ]);
+    }
+
+    /**
+     * Open an active cashier shift for the given user in the given store.
+     *
+     * Cash payments now require the recorder to have an open shift, so tests
+     * that record cash open one first.
+     */
+    protected function openShiftFor(
+        User $user,
+        Store $store,
+        int $openingCash = 0,
+    ): CashSession {
+        return CashSession::factory()->create([
+            'store_id' => $store->id,
+            'cashier_id' => $user->id,
+            'status' => CashSessionStatus::OPEN->value,
+            'opening_cash' => $openingCash,
+            'opened_at' => now(),
+            'open_guard' => $store->id.':'.$user->id,
         ]);
     }
 }

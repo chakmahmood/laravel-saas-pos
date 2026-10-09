@@ -44,6 +44,7 @@ class PaymentTest extends TestCase
     {
         [$owner, $store] = $this->createOwnerWithStore();
         $token = $this->issueToken($owner, $store);
+        $this->openShiftFor($owner, $store);
         $orderId = $this->makeOrderId($store, $token, 10000);
 
         $this->withHeaders($this->bearer($token))
@@ -67,6 +68,7 @@ class PaymentTest extends TestCase
     {
         [$owner, $store] = $this->createOwnerWithStore();
         $token = $this->issueToken($owner, $store);
+        $this->openShiftFor($owner, $store);
         $orderId = $this->makeOrderId($store, $token, 10000);
 
         $this->withHeaders($this->bearer($token))
@@ -106,6 +108,7 @@ class PaymentTest extends TestCase
     {
         [$owner, $store] = $this->createOwnerWithStore();
         $token = $this->issueToken($owner, $store);
+        $this->openShiftFor($owner, $store);
         $orderId = $this->makeOrderId($store, $token, 10000);
 
         $this->withHeaders($this->bearer($token))
@@ -134,6 +137,7 @@ class PaymentTest extends TestCase
     {
         [$owner, $store] = $this->createOwnerWithStore();
         $token = $this->issueToken($owner, $store);
+        $this->openShiftFor($owner, $store);
         $orderId = $this->makeOrderId($store, $token, 10000);
 
         $this->withHeaders($this->bearer($token))
@@ -152,6 +156,7 @@ class PaymentTest extends TestCase
 
         $tokenA = $this->issueToken($ownerA, $storeA);
         $tokenB = $this->issueToken($ownerB, $storeB);
+        $this->openShiftFor($ownerB, $storeB);
 
         $orderB = $this->makeOrderId($storeB, $tokenB);
 
@@ -170,6 +175,7 @@ class PaymentTest extends TestCase
         $cashier = User::factory()->create();
         $this->attachMember($cashier, $store, StoreRole::CASHIER->value, true);
         $token = $this->issueToken($cashier, $store);
+        $this->openShiftFor($cashier, $store);
 
         $orderId = $this->makeOrderId($store, $token, 10000);
 
@@ -193,6 +199,7 @@ class PaymentTest extends TestCase
     {
         [$owner, $store] = $this->createOwnerWithStore();
         $token = $this->issueToken($owner, $store);
+        $this->openShiftFor($owner, $store);
         $orderId = $this->makeOrderId($store, $token, 10000);
 
         $payment = $this->withHeaders($this->bearer($token))
@@ -227,6 +234,7 @@ class PaymentTest extends TestCase
     {
         [$owner, $store] = $this->createOwnerWithStore();
         $token = $this->issueToken($owner, $store);
+        $this->openShiftFor($owner, $store);
         $orderId = $this->makeOrderId($store, $token, 10000);
 
         $payment = $this->withHeaders($this->bearer($token))
@@ -261,6 +269,7 @@ class PaymentTest extends TestCase
     {
         [$owner, $store] = $this->createOwnerWithStore();
         $token = $this->issueToken($owner, $store);
+        $this->openShiftFor($owner, $store);
         $orderId = $this->makeOrderId($store, $token, 10000);
 
         $this->withHeaders($this->bearer($token))
@@ -280,6 +289,7 @@ class PaymentTest extends TestCase
     {
         [$owner, $store] = $this->createOwnerWithStore();
         $token = $this->issueToken($owner, $store);
+        $this->openShiftFor($owner, $store);
         $orderId = $this->makeOrderId($store, $token, 10000);
 
         $this->withHeaders($this->bearer($token))
@@ -302,6 +312,7 @@ class PaymentTest extends TestCase
 
         $tokenA = $this->issueToken($ownerA, $storeA);
         $tokenB = $this->issueToken($ownerB, $storeB);
+        $this->openShiftFor($ownerB, $storeB);
 
         $orderB = $this->makeOrderId($storeB, $tokenB);
 

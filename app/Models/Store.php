@@ -115,6 +115,14 @@ class Store extends Model
         return $this->hasMany(Payment::class);
     }
 
+    /**
+     * Cashier shifts of this store.
+     */
+    public function cashSessions(): HasMany
+    {
+        return $this->hasMany(CashSession::class);
+    }
+
     public function activeSubscription(): HasOne
     {
         return $this->hasOne(Subscription::class)

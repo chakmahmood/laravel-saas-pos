@@ -17,6 +17,7 @@ use App\Models\Order;
 use App\Models\Payment;
 use App\Models\Store;
 use App\Models\User;
+use App\Services\CashSessionService;
 use App\Services\CatalogItemService;
 use App\Services\OrderService;
 use App\Services\PaymentService;
@@ -91,6 +92,19 @@ try {
             ]);
 
             return ['item_id' => $item->id];
+        })(),
+        'open_shift' => (function () use ($payload) {
+            $store = Store::query()->findOrFail($payload['store_id']);
+            $user = User::query()->findOrFail($payload['user_id']);
+
+            $session = app(CashSessionService::class)->open(
+                $store,
+                $user,
+                (int) ($payload['opening_cash'] ?? 0),
+                null,
+            );
+
+            return ['session_id' => $session->id];
         })(),
         default => throw new RuntimeException('unknown-scenario:'.$scenario),
     };

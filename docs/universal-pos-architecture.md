@@ -81,12 +81,13 @@ erDiagram
     categories ||--o{ items : "RENCANA (nullable)"
     items ||--o{ item_variants : "RENCANA (menu/retail)"
 
-    stores ||--o{ customers : "RENCANA"
-    stores ||--o{ cash_sessions : "RENCANA"
-    customers ||--o{ orders : "RENCANA (nullable)"
-    stores ||--o{ orders : "RENCANA"
-    users ||--o{ orders : "cashier RENCANA"
-    cash_sessions ||--o{ orders : "RENCANA (nullable)"
+    stores ||--o{ customers : "SUDAH"
+    stores ||--o{ cash_sessions : "SUDAH"
+    cash_sessions ||--o{ cash_movements : "SUDAH"
+    cash_sessions ||--o{ payments : "SUDAH (cash)"
+    customers ||--o{ orders : "SUDAH (nullable)"
+    stores ||--o{ orders : "SUDAH"
+    users ||--o{ orders : "cashier SUDAH"
     orders ||--|{ order_items : "RENCANA"
     items ||--o{ order_items : "RENCANA (snapshot)"
     orders ||--o{ payments : "RENCANA"
@@ -266,10 +267,22 @@ Unique `(store_id, number)`; index `(store_id, placed_at)`,
 - Counter persisten per toko untuk nomor dokumen yang aman dari race. Nomor
   order tidak pernah diturunkan dari jumlah baris.
 
-#### `cash_sessions` (Rencana)
-- `id`, `store_id`, `opened_by`, `opened_at`, `opening_float`, `closed_by`
-  nullable, `closed_at` nullable, `expected_cash`, `actual_cash`,
-  `difference`, `status` (`open`/`closed`), `note`, timestamps.
+#### `cash_sessions` (Sudah — Phase 3A)
+- `id`, `store_id`, `cashier_id`, `status` (`open`/`closed`), `opening_cash`,
+  `opened_at`, `closed_at`, `expected_cash`, `actual_cash`, `difference`
+  (signed), `opening_notes`, `closing_notes`, `open_guard`, timestamps.
+- `open_guard` = `"<store_id>:<cashier_id>"` saat terbuka, `NULL` saat tutup;
+  unique index = jaminan satu shift terbuka per kasir/toko (race-safe).
+- `expected_cash = opening_cash + cash_in - cash_out + cash_sales`.
+
+#### `cash_movements` (Sudah — Phase 3A)
+- `id`, `store_id`, `cash_session_id`, `user_id`, `type` (`cash_in`/`cash_out`),
+  `amount`, `reason`, timestamps.
+- Append-only (tanpa endpoint edit/delete). Movement hanya pada shift terbuka.
+
+#### `payments.cash_session_id` (Sudah — Phase 3A)
+- Nullable FK; diisi hanya untuk pembayaran tunai yang tercatat pada shift
+  terbuka milik pencatat. Pembayaran lama tetap `NULL` (tidak diatribusikan).
 
 ### 4.3 Rencana — Ekstensi industri (dibuat saat modulnya digarap)
 
@@ -651,7 +664,8 @@ Detail per fase ada di `docs/universal-pos-roadmap.md`.
 1. **Phase 0 (selesai):** audit + `business_type` + dokumentasi.
 2. **Phase 1 (selesai):** Categories API + Catalog Items API (+ kuota item + policy).
 3. **Phase 2 (selesai):** Customers API + Order & Order Items + Payments (tanpa gateway).
-4. **Phase 3:** Cash sessions + Sales reports.
+4. **Phase 3A (selesai):** Cash sessions / shift kasir + integrasi payment tunai.
+   **Phase 3B:** Sales reports (belum).
 5. **Phase 4+:** Modul industri (retail inventory, F&B, laundry, servis, salon)
    dan varian/modifier/paket sesuai prioritas bisnis.
 

@@ -55,10 +55,12 @@ Tidak dijalankan sebagai bagian dari `php artisan test`.
 | Overpayment | 8 worker bayar 5.000 atas order 10.000 | `successes=2 validation_failures=6 paid_sum=10000 status=paid` | Total dibayar == total order, tidak overpaid |
 | Void race | 4 worker void payment yang sama | `successes=1 conflicts=3 payment_status=voided` | Tepat satu void, status order dihitung ulang |
 | Item quota | 12 worker buat item, limit plan 5 | `successes=5 limit_failures=7 items_in_db=5` | Tidak melewati kuota |
+| Open shift | 6 worker buka shift kasir/toko sama | `successes=1 conflicts=5 open_shifts_in_db=1` | Tepat satu shift terbuka (unique `open_guard`) |
 
 Kesimpulan: **PASS** — `lockForUpdate` pada baris `stores` (nomor order, kuota
-item) dan baris `orders` (pembayaran/void) benar-benar men-serialisasi akses
-pada MySQL InnoDB.
+item) dan baris `orders`/`cash_sessions` (pembayaran/void/shift) benar-benar
+men-serialisasi akses pada MySQL InnoDB. Pembukaan shift juga dijaga unique index
+`cash_sessions.open_guard`.
 
 ---
 
@@ -70,3 +72,5 @@ pada MySQL InnoDB.
   bukti concurrency; hanya protokol & logika.
 - Item quota memakai `CatalogItemService` (lock baris store). Order memakai
   `OrderService`; payment/void memakai `PaymentService` (lock baris order).
+- Sejak Phase 3A, skenario pembayaran tunai membuka shift untuk pemilik lebih
+  dulu (pembayaran tunai kini memerlukan shift terbuka).

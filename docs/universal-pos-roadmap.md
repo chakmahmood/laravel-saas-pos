@@ -115,12 +115,15 @@ payment/void.
 
 ## Phase 3 — Cash Sessions & Reports
 
-**Belum dikerjakan.**
+**Phase 3A (Cash Sessions) selesai. Reports belum dikerjakan.**
 
-- [ ] Migrasi `cash_sessions`; buka/tutup sesi; rekap kas.
-- [ ] Hubungkan `payments.cash_session_id`.
-- [ ] Laporan penjualan (harian/periode, per metode, per kasir).
-- [ ] Test rekonsiliasi & isolasi.
+- [x] Migrasi `cash_sessions` + `cash_movements`; buka/tutup sesi; rekap kas.
+- [x] Hubungkan `payments.cash_session_id` (tunai → shift kasir).
+- [x] Jaminan satu shift terbuka per kasir/toko (unique `open_guard`, race-safe).
+- [x] Concurrency MySQL: open-shift race (5 skenario harness PASS).
+- [x] Test rekonsiliasi & isolasi (`tests/Feature/CashSessionTest.php`).
+- [ ] **Phase 3B — Laporan penjualan** (harian/periode, per metode, per kasir).
+- [ ] Migrasi baru belum diterapkan ke DB development (menunggu review).
 
 ---
 

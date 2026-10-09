@@ -19,12 +19,14 @@
 
 use App\Enums\PaymentRecordStatus;
 use App\Enums\PaymentStatus;
+use App\Models\CashSession;
 use App\Models\Item;
 use App\Models\Order;
 use App\Models\Plan;
 use App\Models\Store;
 use App\Models\Subscription;
 use App\Models\User;
+use App\Services\CashSessionService;
 use App\Services\OrderService;
 use App\Services\PaymentService;
 use Illuminate\Support\Facades\Artisan;
@@ -52,7 +54,7 @@ echo trim(Artisan::output())."\n\n";
 
 /* --------------------------------------------------------------- fixtures */
 
-function makeStore(string $label): array
+function makeStore(string $label, bool $withShift = true): array
 {
     $suffix = $label.'-'.bin2hex(random_bytes(4));
 
@@ -70,6 +72,10 @@ function makeStore(string $label): array
     ]);
 
     $owner->stores()->attach($store->id, ['role' => 'owner', 'is_active' => true]);
+
+    if ($withShift) {
+        app(CashSessionService::class)->open($store, $owner, 0, null);
+    }
 
     return [$store, $owner];
 }
@@ -346,6 +352,37 @@ printf("  successes=%d limit_failures=%d items_in_db=%d limit=%d\n", $successes,
 
 if ($successes !== $limit || $itemCount !== $limit) {
     $failures[] = "item quota: expected exactly {$limit} items, got successes={$successes} db={$itemCount}";
+}
+
+/* --------------------------------------------- scenario 5: open shift race */
+
+echo "\n== Scenario 5: concurrent open shift (same cashier/store) ==\n";
+[$store5, $owner5] = makeStore('shift', withShift: false);
+
+$n = 6;
+$payload = ['store_id' => $store5->id, 'user_id' => $owner5->id, 'opening_cash' => 10000];
+[, $results] = runConcurrent($n, 'open_shift', array_fill(0, $n, $payload), $database);
+
+$successes = 0;
+$conflicts = 0;
+foreach ($results as $r) {
+    if (($r['ok'] ?? false) === true) {
+        $successes++;
+    } elseif (($r['kind'] ?? '') === 'conflict') {
+        $conflicts++;
+    }
+}
+
+$openCount = CashSession::query()
+    ->where('store_id', $store5->id)
+    ->where('cashier_id', $owner5->id)
+    ->where('status', 'open')
+    ->count();
+
+printf("  successes=%d conflicts=%d open_shifts_in_db=%d\n", $successes, $conflicts, $openCount);
+
+if ($successes !== 1 || $openCount !== 1) {
+    $failures[] = "open shift race: expected exactly 1 open shift, got successes={$successes} db={$openCount}";
 }
 
 /* ------------------------------------------------------------- summary */
