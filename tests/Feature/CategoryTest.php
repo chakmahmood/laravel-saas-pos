@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Enums\StoreRole;
 use App\Models\Category;
+use App\Models\Item;
 use App\Models\User;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -407,5 +408,58 @@ class CategoryTest extends TestCase
             'store_id' => 999999,
             'name' => 'Ghost',
         ]);
+    }
+
+    public function test_category_in_use_by_items_cannot_be_deleted(): void
+    {
+        [$user, $store] = $this->createOwnerWithStore();
+        $category = Category::factory()->for($store, 'store')->create(['name' => 'Minuman']);
+        $item = Item::factory()->for($store, 'store')->create([
+            'category_id' => $category->id,
+            'name' => 'Es Teh',
+        ]);
+
+        $token = $this->issueToken($user, $store);
+
+        $this->withHeaders($this->bearer($token))
+            ->deleteJson('/api/categories/'.$category->id)
+            ->assertStatus(409)
+            ->assertJsonPath('code', 'category_in_use');
+
+        $this->assertDatabaseHas('categories', ['id' => $category->id]);
+        $this->assertDatabaseHas('items', ['id' => $item->id]);
+    }
+
+    public function test_category_can_be_deleted_after_its_items_are_removed(): void
+    {
+        [$user, $store] = $this->createOwnerWithStore();
+        $category = Category::factory()->for($store, 'store')->create();
+        $item = Item::factory()->for($store, 'store')->create([
+            'category_id' => $category->id,
+        ]);
+
+        $token = $this->issueToken($user, $store);
+
+        $item->delete();
+
+        $this->withHeaders($this->bearer($token))
+            ->deleteJson('/api/categories/'.$category->id)
+            ->assertOk();
+
+        $this->assertDatabaseMissing('categories', ['id' => $category->id]);
+    }
+
+    public function test_unused_category_can_be_deleted(): void
+    {
+        [$user, $store] = $this->createOwnerWithStore();
+        $category = Category::factory()->for($store, 'store')->create();
+
+        $token = $this->issueToken($user, $store);
+
+        $this->withHeaders($this->bearer($token))
+            ->deleteJson('/api/categories/'.$category->id)
+            ->assertOk();
+
+        $this->assertDatabaseMissing('categories', ['id' => $category->id]);
     }
 }

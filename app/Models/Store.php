@@ -83,6 +83,14 @@ class Store extends Model
         return $this->hasMany(Category::class);
     }
 
+    /**
+     * Catalog items owned by this store.
+     */
+    public function items(): HasMany
+    {
+        return $this->hasMany(Item::class);
+    }
+
     public function activeSubscription(): HasOne
     {
         return $this->hasOne(Subscription::class)

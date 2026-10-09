@@ -8,6 +8,7 @@ use App\Http\Requests\Category\UpdateCategoryRequest;
 use App\Http\Resources\CategoryResource;
 use App\Models\Category;
 use App\Models\Store;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -111,9 +112,12 @@ class CategoryController extends Controller
     /**
      * Delete a category of the current store.
      *
-     * Deletion is a hard delete. Once the catalog items table exists
-     * (Phase 1b), a category that is still referenced by items must be
-     * rejected here with a 409 instead of cascading item deletion.
+     * A category that is still referenced by catalog items cannot be deleted.
+     * The relation is checked first for a clean 409; the database foreign key
+     * (RESTRICT) is the backstop for the race between the check and the delete,
+     * and a raw foreign key violation is translated into the same 409.
+     *
+     * Deleting a category never deletes items.
      */
     public function destroy(Request $request, string $category): JsonResponse
     {
@@ -121,11 +125,39 @@ class CategoryController extends Controller
 
         Gate::authorize('delete', $model);
 
-        $model->delete();
+        if ($model->items()->exists()) {
+            return $this->categoryInUseResponse();
+        }
+
+        try {
+            $model->delete();
+        } catch (QueryException $exception) {
+            if ($this->isForeignKeyViolation($exception)) {
+                return $this->categoryInUseResponse();
+            }
+
+            throw $exception;
+        }
 
         return response()->json([
             'message' => 'Kategori berhasil dihapus.',
         ]);
+    }
+
+    private function categoryInUseResponse(): JsonResponse
+    {
+        return response()->json([
+            'message' => 'Kategori masih digunakan oleh item dan tidak dapat dihapus.',
+            'code' => 'category_in_use',
+        ], 409);
+    }
+
+    private function isForeignKeyViolation(QueryException $exception): bool
+    {
+        $driverCode = $exception->errorInfo[1] ?? null;
+
+        return $driverCode === 1451
+            || str_contains(strtolower($exception->getMessage()), 'foreign key');
     }
 
     /**

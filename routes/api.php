@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CategoryController;
 use App\Http\Controllers\Api\CurrentStoreController;
+use App\Http\Controllers\Api\ItemController;
 use App\Http\Controllers\Api\UserController;
 use Illuminate\Support\Facades\Route;
 
@@ -71,6 +72,36 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::delete('/categories/{category}', [
             CategoryController::class,
+            'destroy',
+        ]);
+
+        Route::get('/items', [
+            ItemController::class,
+            'index',
+        ]);
+
+        Route::post('/items', [
+            ItemController::class,
+            'store',
+        ]);
+
+        Route::get('/items/{item}', [
+            ItemController::class,
+            'show',
+        ]);
+
+        Route::put('/items/{item}', [
+            ItemController::class,
+            'update',
+        ]);
+
+        Route::patch('/items/{item}', [
+            ItemController::class,
+            'update',
+        ]);
+
+        Route::delete('/items/{item}', [
+            ItemController::class,
             'destroy',
         ]);
     });
