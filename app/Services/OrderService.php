@@ -41,6 +41,7 @@ class OrderService
 
     public function __construct(
         private readonly OrderNumberService $numbers,
+        private readonly StockLedgerService $stock,
     ) {}
 
     /**
@@ -114,6 +115,14 @@ class OrderService
                 'created_at' => now(),
             ]);
 
+            /*
+             * Reserve stock for stock-tracked items inside the same
+             * transaction. No-op for orders without tracked items, so
+             * non-inventory orders are unaffected. An insufficient-stock or
+             * unsupported-inventory error aborts the whole order.
+             */
+            $this->stock->reserveForOrder($lockedStore, $order, $cashier);
+
             return $order;
         });
     }
@@ -161,6 +170,20 @@ class OrderService
             }
 
             $locked->save();
+
+            /*
+             * Inventory reacts to the *new* status, inside the same
+             * transaction:
+             * - completed: commit the reservation (reduce on-hand).
+             * - cancelled before commit: release the reservation.
+             * Both are no-ops when the order never touched inventory, and both
+             * are idempotent at the ledger level.
+             */
+            if ($to === FulfillmentStatus::COMPLETED) {
+                $this->stock->commitForOrder($locked, $actor);
+            } elseif ($to === FulfillmentStatus::CANCELLED) {
+                $this->stock->releaseForOrder($locked, $actor);
+            }
 
             $locked->statusHistories()->create([
                 'from_fulfillment_status' => $from->value,

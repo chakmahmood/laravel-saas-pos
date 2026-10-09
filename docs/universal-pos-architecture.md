@@ -697,8 +697,10 @@ Detail per fase ada di `docs/universal-pos-roadmap.md`.
 4. **Phase 3A (selesai):** Cash sessions / shift kasir + integrasi payment tunai.
 5. **Phase 3B (berjalan):** Inventory & Stock Management.
    **Checkpoint 1 (selesai):** fondasi DB/model/enum/relasi + provisioning lokasi
-   default + test dasar (`docs/inventory-design.md`). Integrasi order, reservasi,
-   komit stok, endpoint, adjustment, transfer, receipt menyusul.
+   default + test dasar. **Checkpoint 2 (selesai):** `StockLedgerService`,
+   reservasi/komit/pelepasan terintegrasi `OrderService`, idempotency, tenant &
+   business-type validation (`docs/inventory-design.md`). Endpoint, adjustment,
+   transfer, receipt menyusul.
    **Sales reports dipindah ke Phase 3C** (lihat `docs/universal-pos-roadmap.md`).
 6. **Phase 4+:** Modul industri (F&B, laundry, servis, salon) dan
    varian/modifier/paket sesuai prioritas bisnis.

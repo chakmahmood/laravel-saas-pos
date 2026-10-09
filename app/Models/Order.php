@@ -32,6 +32,8 @@ class Order extends Model
         'paid_amount',
         'payment_status',
         'fulfillment_status',
+        'stock_location_id',
+        'stock_committed_at',
         'notes',
         'placed_at',
         'completed_at',
@@ -52,6 +54,7 @@ class Order extends Model
             'placed_at' => 'datetime',
             'completed_at' => 'datetime',
             'cancelled_at' => 'datetime',
+            'stock_committed_at' => 'datetime',
         ];
     }
 
@@ -94,6 +97,23 @@ class Order extends Model
     public function stockMovements(): HasMany
     {
         return $this->hasMany(StockMovement::class);
+    }
+
+    /**
+     * Physical location this order fulfils stock from (NULL for non-inventory
+     * orders).
+     */
+    public function stockLocation(): BelongsTo
+    {
+        return $this->belongsTo(StockLocation::class);
+    }
+
+    /**
+     * Whether the order's stock has been committed exactly once.
+     */
+    public function hasCommittedStock(): bool
+    {
+        return $this->stock_committed_at !== null;
     }
 
     /**

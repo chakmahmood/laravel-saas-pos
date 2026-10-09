@@ -133,8 +133,8 @@ payment/void.
 
 ### Phase 3B — Inventory & Stock Management
 
-**Checkpoint 1 (Inventory Foundation) selesai.** Detail desain:
-`docs/inventory-design.md`.
+**Checkpoint 1 (Inventory Foundation) & Checkpoint 2 (Stock Ledger Service &
+Order Integration) selesai.** Detail desain: `docs/inventory-design.md`.
 
 - [x] Migrasi `items.tracks_stock` (default false) + index.
 - [x] Migrasi `stock_locations` (jaminan portabel satu default per store via
@@ -147,8 +147,17 @@ payment/void.
       Order/OrderItem + factory.
 - [x] Provisioning lokasi default idempotent + `php artisan stock:provision-locations`.
 - [x] Test fondasi (item flag, lokasi, saldo, movement, enum, provisioning).
-- [ ] **Checkpoint 2:** `StockLedgerService`, integrasi OrderService (reservasi,
-      komit, lepas), kolom `orders.stock_location_id`/`stock_committed_at`.
+- [x] Migrasi aditif `orders.stock_location_id` + `orders.stock_committed_at`.
+- [x] `StockLedgerService` (reserve/commit/release, conditional atomic update,
+      lock order `store → order → balances`).
+- [x] Integrasi `OrderService`: reservasi saat create, komit saat `completed`,
+      pelepasan saat `cancelled` (sebelum komit).
+- [x] Idempotency per order item + guard `stock_committed_at`; tenant & business
+      type divalidasi di service.
+- [x] Test integrasi order (reservasi, komit, batal, rollback, tenant,
+      idempotency, decimal 1.125, void payment tidak mengubah stok).
+- [x] Concurrency MySQL skenario 6 (berebut unit terakhir) & 7 (komit ganda)
+      pada DB khusus `saas_pos_concurrency_test` — PASS.
 - [ ] **Checkpoint berikutnya:** endpoint/Policy/Resource inventory.
 - [ ] Ditunda: adjustment, transfer, receipt, retur, multi-satuan, BOM/resep,
       konsumsi bahan baku, refund/retur otomatis.

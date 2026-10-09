@@ -21,6 +21,7 @@ use App\Services\CashSessionService;
 use App\Services\CatalogItemService;
 use App\Services\OrderService;
 use App\Services\PaymentService;
+use App\Services\StockLedgerService;
 use Illuminate\Validation\ValidationException;
 
 require __DIR__.'/boot.php';
@@ -105,6 +106,14 @@ try {
             );
 
             return ['session_id' => $session->id];
+        })(),
+        'commit_order' => (function () use ($payload) {
+            $order = Order::query()->findOrFail($payload['order_id']);
+            $user = User::query()->findOrFail($payload['user_id']);
+
+            app(StockLedgerService::class)->commitForOrder($order, $user);
+
+            return ['order_id' => $order->id];
         })(),
         default => throw new RuntimeException('unknown-scenario:'.$scenario),
     };

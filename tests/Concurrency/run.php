@@ -8,6 +8,10 @@
  *   1. Concurrent order creation yields unique order numbers.
  *   2. Concurrent payments cannot overpay an order.
  *   3. Concurrent voids of the same payment produce exactly one void.
+ *   4. Item quota cannot be exceeded.
+ *   5. Only one open shift per cashier/store.
+ *   6. Two orders racing for the last unit: exactly one reserves it.
+ *   7. Concurrent commits of one order: exactly one commit is effective.
  *
  * Usage:
  *   php tests/Concurrency/run.php
@@ -23,12 +27,16 @@ use App\Models\CashSession;
 use App\Models\Item;
 use App\Models\Order;
 use App\Models\Plan;
+use App\Models\StockBalance;
+use App\Models\StockLocation;
+use App\Models\StockMovement;
 use App\Models\Store;
 use App\Models\Subscription;
 use App\Models\User;
 use App\Services\CashSessionService;
 use App\Services\OrderService;
 use App\Services\PaymentService;
+use App\Services\StockLocationProvisioner;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 
@@ -54,7 +62,7 @@ echo trim(Artisan::output())."\n\n";
 
 /* --------------------------------------------------------------- fixtures */
 
-function makeStore(string $label, bool $withShift = true): array
+function makeStore(string $label, bool $withShift = true, string $businessType = 'other'): array
 {
     $suffix = $label.'-'.bin2hex(random_bytes(4));
 
@@ -69,6 +77,7 @@ function makeStore(string $label, bool $withShift = true): array
         'name' => 'Store '.$suffix,
         'slug' => 'store-'.$suffix,
         'is_active' => true,
+        'business_type' => $businessType,
     ]);
 
     $owner->stores()->attach($store->id, ['role' => 'owner', 'is_active' => true]);
@@ -78,6 +87,39 @@ function makeStore(string $label, bool $withShift = true): array
     }
 
     return [$store, $owner];
+}
+
+/**
+ * Store that supports inventory, with a default location, one stock-tracked
+ * item and an on-hand balance.
+ *
+ * @return array{0: Store, 1: User, 2: Item, 3: StockLocation}
+ */
+function makeInventoryStore(string $label, string $onHand): array
+{
+    [$store, $owner] = makeStore($label, withShift: false, businessType: 'retail');
+
+    $location = app(StockLocationProvisioner::class)->ensureDefaultForStore($store);
+
+    $item = Item::create([
+        'store_id' => $store->id,
+        'name' => 'Tracked '.$label,
+        'type' => 'product',
+        'selling_price' => 10000,
+        'unit' => 'pcs',
+        'tracks_stock' => true,
+        'is_active' => true,
+    ]);
+
+    StockBalance::create([
+        'store_id' => $store->id,
+        'stock_location_id' => $location->id,
+        'item_id' => $item->id,
+        'quantity_on_hand' => $onHand,
+        'quantity_reserved' => 0,
+    ]);
+
+    return [$store, $owner, $item, $location];
 }
 
 /**
@@ -383,6 +425,118 @@ printf("  successes=%d conflicts=%d open_shifts_in_db=%d\n", $successes, $confli
 
 if ($successes !== 1 || $openCount !== 1) {
     $failures[] = "open shift race: expected exactly 1 open shift, got successes={$successes} db={$openCount}";
+}
+
+/* ------------------------------------ scenario 6: last unit reservation */
+
+echo "\n== Scenario 6: last unit reservation race ==\n";
+[$store6, $owner6, $item6] = makeInventoryStore('lastunit', '1.000');
+
+$n = 2;
+$payload = ['store_id' => $store6->id, 'user_id' => $owner6->id, 'item_id' => $item6->id];
+[, $results] = runConcurrent($n, 'make_order', array_fill(0, $n, $payload), $database);
+
+$successes = 0;
+$conflicts = 0;
+foreach ($results as $r) {
+    if (($r['ok'] ?? false) === true) {
+        $successes++;
+    } elseif (($r['kind'] ?? '') === 'conflict') {
+        $conflicts++;
+    }
+}
+
+$orders6 = Order::query()->where('store_id', $store6->id)->count();
+$balance6 = StockBalance::query()
+    ->where('store_id', $store6->id)
+    ->where('item_id', $item6->id)
+    ->firstOrFail();
+$reservations6 = StockMovement::query()
+    ->where('store_id', $store6->id)
+    ->where('item_id', $item6->id)
+    ->where('type', 'reservation')
+    ->count();
+
+printf(
+    "  successes=%d conflicts=%d orders=%d on_hand=%s reserved=%s reservations=%d\n",
+    $successes,
+    $conflicts,
+    $orders6,
+    $balance6->quantity_on_hand,
+    $balance6->quantity_reserved,
+    $reservations6,
+);
+
+if ($successes !== 1 || $orders6 !== 1) {
+    $failures[] = "last unit: expected exactly 1 successful order, got successes={$successes} orders={$orders6}";
+}
+if ($reservations6 !== 1) {
+    $failures[] = "last unit: expected exactly 1 reservation movement, got {$reservations6}";
+}
+if ((float) $balance6->quantity_reserved > (float) $balance6->quantity_on_hand) {
+    $failures[] = 'last unit: reserved exceeds on_hand';
+}
+if ((float) $balance6->quantity_reserved !== 1.0) {
+    $failures[] = "last unit: expected reserved=1.000, got {$balance6->quantity_reserved}";
+}
+
+/* ----------------------------------------- scenario 7: double commit race */
+
+echo "\n== Scenario 7: double commit race ==\n";
+[$store7, $owner7, $item7] = makeInventoryStore('commit', '5.000');
+
+$order7 = app(OrderService::class)->create($store7, $owner7, [
+    'items' => [['item_id' => $item7->id, 'quantity' => 2]],
+]);
+
+$n = 2;
+$payload = ['order_id' => $order7->id, 'user_id' => $owner7->id];
+[, $results] = runConcurrent($n, 'commit_order', array_fill(0, $n, $payload), $database);
+
+$successes = 0;
+foreach ($results as $r) {
+    if (($r['ok'] ?? false) === true) {
+        $successes++;
+    }
+}
+
+$order7->refresh();
+$balance7 = StockBalance::query()
+    ->where('store_id', $store7->id)
+    ->where('item_id', $item7->id)
+    ->firstOrFail();
+$sales7 = StockMovement::query()
+    ->where('store_id', $store7->id)
+    ->where('order_id', $order7->id)
+    ->where('type', 'sale_out')
+    ->count();
+$releases7 = StockMovement::query()
+    ->where('store_id', $store7->id)
+    ->where('order_id', $order7->id)
+    ->where('type', 'reservation_release')
+    ->count();
+
+printf(
+    "  successes=%d committed_at=%s on_hand=%s reserved=%s sale_out=%d release=%d\n",
+    $successes,
+    $order7->stock_committed_at?->toDateTimeString() ?? 'null',
+    $balance7->quantity_on_hand,
+    $balance7->quantity_reserved,
+    $sales7,
+    $releases7,
+);
+
+if ($successes !== 2) {
+    $failures[] = "double commit: expected both calls to succeed idempotently, got {$successes}";
+}
+if ($order7->stock_committed_at === null) {
+    $failures[] = 'double commit: stock_committed_at not set';
+}
+if ((string) $balance7->quantity_on_hand !== '3.000' || (string) $balance7->quantity_reserved !== '0.000') {
+    $failures[] = "double commit: expected on_hand=3.000 reserved=0.000, got on_hand={$balance7->quantity_on_hand} reserved={$balance7->quantity_reserved}";
+}
+if ($sales7 !== 1 || $releases7 !== 1) {
+    $failures[] = "double commit: expected exactly one sale_out and one reservation_release, got sale={$sales7} release={$releases7}";
 }
 
 /* ------------------------------------------------------------- summary */

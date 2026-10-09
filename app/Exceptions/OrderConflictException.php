@@ -23,6 +23,14 @@ class OrderConflictException extends Exception
         parent::__construct($message);
     }
 
+    /**
+     * Stable machine-readable error code for clients and tests.
+     */
+    public function errorCode(): string
+    {
+        return $this->errorCode;
+    }
+
     public function render(Request $request): JsonResponse
     {
         return response()->json([

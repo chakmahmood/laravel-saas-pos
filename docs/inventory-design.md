@@ -1,10 +1,12 @@
 # Inventory & Stock Management — Design
 
-> Status: **Checkpoint 1 (Inventory Foundation)** — fondasi database, model,
-> enum, relasi, provisioning, dan test dasar.
-> Belum ada endpoint, integrasi order, reservasi, komit stok, adjustment,
-> transfer, atau receipt. Dokumen ini menjelaskan apa yang **sudah** ada dan apa
-> yang **sengaja ditunda**.
+> Status: **Checkpoint 2 (Stock Ledger Service & Order Integration)**.
+> Checkpoint 1 (fondasi DB/model/enum/relasi/provisioning) **plus** ledger
+> service, reservasi saat order dibuat, komit saat `completed`, pelepasan saat
+> `cancelled` (sebelum komit), idempotency, validasi tenant, dan integrasi
+> `OrderService`.
+> Belum ada endpoint inventory, adjustment, transfer, receipt, atau return.
+> Dokumen ini menjelaskan apa yang **sudah** ada dan apa yang **sengaja ditunda**.
 >
 > Pendamping: `docs/universal-pos-architecture.md`, `docs/universal-pos-roadmap.md`.
 
@@ -26,8 +28,8 @@
 5. **Kuantitas movement selalu positif.** Arah ditentukan oleh `type`.
 6. **Tenant dari token, bukan request.** Setiap baris inventory punya `store_id`;
    lokasi, item, dan store harus satu tenant. FK saja **tidak** menjamin ini,
-   sehingga validasi konsistensi tenant dilakukan di service (checkpoint
-   transaksi berikutnya).
+   sehingga `StockLedgerService` memvalidasi konsistensi tenant (item/lokasi
+   selalu diambil lewat relasi store; saldo di-query dengan filter `store_id`).
 7. **Gating ganda.** Stok hanya diproses bila `BusinessType::usesInventory()`
    benar **dan** `items.tracks_stock = true`.
 
@@ -131,11 +133,13 @@ Helper arah pada enum (kontrak untuk ledger service nanti):
 
 - Semua tabel inventory memiliki `store_id`; query wajib di-scope ke toko aktif
   (pola eksplisit, bukan global scope — konsisten dengan proyek).
-- FK tidak menjamin `item`, `store`, dan `location` satu tenant. Service
-  (checkpoint berikutnya) **wajib** memvalidasi:
-  - `$store->stockLocations()->findOrFail($locationId)`
-  - `$store->items()->findOrFail($itemId)`
-- Record tenant lain diperlakukan seperti tidak ada (404).
+- FK tidak menjamin `item`, `store`, dan `location` satu tenant. `StockLedgerService`
+  memvalidasi:
+  - item order diambil lewat `$store->items()` (item tenant lain → ditolak
+    dengan `stock_tenant_mismatch`);
+  - lokasi default diambil lewat `$store->stockLocations()`;
+  - saldo di-query dengan filter `store_id` + `stock_location_id` + `item_id`.
+- Record tenant lain diperlakukan seperti tidak ada (tidak pernah dipakai).
 
 ---
 
@@ -193,20 +197,111 @@ Sifat:
 
 ---
 
-## 8. Keputusan Final (Checkpoint 1)
+## 8. Integrasi Order (Checkpoint 2)
 
-- Ledger + saldo + lokasi dengan skema di atas.
-- `tracks_stock` default `false`.
-- Reservasi dipisah dari fisik; `available = on_hand - reserved`.
-- Order membuat reservasi, `completed` mengommit, `cancelled` (sebelum komit)
-  melepas reservasi; void pembayaran tidak mengubah stok. **(Perilaku ini
-  disepakati, implementasinya checkpoint berikutnya.)**
-- Lokasi default per store dijamin `default_guard`; provisioning idempotent.
-- Tidak ada DB CHECK untuk saldo (alasan portabilitas di §9).
+`StockLedgerService` adalah satu-satunya jalur tulis inventory order. Ia dipanggil
+dari `OrderService` **di dalam transaksi yang sama** dengan perubahan order.
+
+### 8.1 Gating kapabilitas
+
+Inventory hanya memproses item bila:
+- `store.business_type->usesInventory()` benar **dan** `items.tracks_stock` benar.
+
+Aturan gating berada di `StockLedgerService` (tidak tersebar). Jika order berisi
+item `tracks_stock = true` pada store yang **tidak** mendukung inventory, order
+ditolak dengan 409 `inventory_not_supported`. Item `tracks_stock = false` tidak
+menghasilkan movement dan tidak membutuhkan saldo.
+
+### 8.2 Pemilihan lokasi
+
+- Untuk order dengan item ber-stok, lokasi fulfillment = lokasi **default aktif**
+  milik store (`is_default = true`, `is_active = true`), disimpan ke
+  `orders.stock_location_id`.
+- Lokasi **tidak** pernah diambil dari input client dan **tidak** dibuat
+  otomatis saat checkout. Bila tidak ada, order gagal 409
+  `stock_location_unavailable`.
+- Order tanpa item ber-stok: `stock_location_id` tetap `NULL`.
+
+### 8.3 Reservasi (order dibuat)
+
+- Transaksi order yang sama: item ber-stok diagregasi per item, saldo dikunci
+  (`lockForUpdate` urut `(location_id, item_id)`), ketersediaan
+  (`quantity_on_hand - quantity_reserved >= diminta`) diperiksa lewat
+  **conditional atomic UPDATE** dan jumlah baris terpengaruh diverifikasi.
+- `quantity_reserved` bertambah; `quantity_on_hand` **tidak** berubah.
+- Satu movement `reservation` per order item (kunci idempotensi per order item).
+- Jika satu item saja tidak cukup, seluruh transaksi rollback: order, order
+  items, saldo, dan movement tidak tersisa. Error 409 `insufficient_stock`.
+
+### 8.4 Komit (fulfillment `completed`)
+
+- Memproses **hanya** reservasi yang benar-benar ada (dari ledger
+  `reservation`), bukan dari status `tracks_stock` item saat ini.
+- Saldo dikunci; `quantity_on_hand` dan `quantity_reserved` masing-masing
+  dikurangi (conditional, diverifikasi).
+- Ledger mencatat `sale_out` **dan** `reservation_release` per order item.
+- `orders.stock_committed_at` diisi tepat sekali setelah semua komit berhasil.
+- Idempotent: order yang sudah komit (`stock_committed_at` terisi) menjadi
+  no-op; retry tidak mengurangi saldo dua kali.
+
+### 8.5 Pembatalan sebelum komit
+
+- Reservasi yang ada dilepas: `quantity_reserved` berkurang, `quantity_on_hand`
+  **tidak** berubah.
+- Ledger mencatat `reservation_release` per order item (kunci `cancel_release`).
+- Order tanpa reservasi → no-op. Pembatalan berulang → no-op (idempotent).
+- `completed` tetap final; tidak ada pembatalan setelah komit atau retur
+  otomatis pada checkpoint ini.
+
+### 8.6 Pembayaran tidak menyentuh stok
+
+Reservasi/komit **tidak** terikat pada `payment_status`, pembuatan payment, void
+payment, atau cash session. Void payment tidak menghasilkan movement inventory.
+
+### 8.7 Idempotency key
+
+Deterministik per order item & peristiwa, unik per store:
+
+| Peristiwa | Key |
+|-----------|-----|
+| Reservasi | `order:{id}:item:{orderItemId}:reserve` |
+| Komit penjualan | `order:{id}:item:{orderItemId}:sale` |
+| Pelepasan saat komit | `order:{id}:item:{orderItemId}:commit_release` |
+| Pelepasan saat batal | `order:{id}:item:{orderItemId}:cancel_release` |
+
+Guard primer = baris order yang dikunci + `stock_committed_at` (komit) atau
+keberadaan movement pelepasan (batal). Unique `(store_id, idempotency_key)`
+adalah lapisan kedua; pelanggarannya membatalkan transaksi (bukan diam-diam
+dianggap sukses), sehingga retry identik dan konflik data sesungguhnya
+dibedakan.
+
+### 8.8 Locking & rollback
+
+- Urutan kunci kanonik: **store → order → stock_balances (location_id ASC,
+  item_id ASC)**. Order creation sudah mengunci baris store; komit/pelepasan
+  mengunci baris order lalu saldo; transfer (nanti) mengunci saldo urut id.
+- Setiap perubahan saldo memakai conditional atomic UPDATE + pemeriksaan
+  affected rows; tidak ada read-modify-write tanpa proteksi.
+- Semua perubahan saldo + movement + timestamp order berada dalam satu
+  transaksi; kegagalan apa pun me-rollback seluruhnya.
+- Aritmetika kuantitas memakai integer milli (`App\Support\Quantity`), bukan
+  float, untuk menghindari drift desimal.
 
 ---
 
-## 9. Mengapa Tanpa Constraint CHECK Saldo di Database
+## 9. Keputusan Final
+
+- Ledger + saldo + lokasi dengan skema Checkpoint 1.
+- `tracks_stock` default `false`; order non-inventory tidak berubah perilaku.
+- `available = on_hand - reserved`.
+- Order membuat reservasi; `completed` mengommit; `cancelled` (sebelum komit)
+  melepas; void pembayaran tidak mengubah stok. **Terimplementasi (Checkpoint 2).**
+- Lokasi default per store dijamin `default_guard`; provisioning idempotent.
+- Tanpa DB CHECK untuk saldo (alasan portabilitas di §10).
+
+---
+
+## 10. Mengapa Tanpa Constraint CHECK Saldo di Database
 
 - `Illuminate\Database\Schema\Blueprint` tidak punya API `check` portabel.
 - SQLite tidak mendukung `ALTER TABLE ... ADD CONSTRAINT`; CHECK hanya bisa
@@ -215,28 +310,32 @@ Sifat:
   SQLite test, sehingga constraint tidak teruji.
 - Karena itu non-negativitas (`quantity_on_hand >= 0`,
   `quantity_reserved >= 0`, `quantity_reserved <= quantity_on_hand`) ditegakkan
-  di **service layer** pada checkpoint transaksi berikutnya, dan diuji di sana.
+  di **service layer**, dilindungi conditional UPDATE + pemeriksaan affected
+  rows, dan diuji di suite.
 
 ---
 
-## 10. Ditunda (Belum Diimplementasikan)
+## 11. Ditunda (Belum Diimplementasikan)
 
-- Service ledger (`StockLedgerService`), reservasi, komit stok, pelepasan.
-- Integrasi `OrderService` (reservasi saat create; komit/lepas saat transisi
-  fulfillment).
-- Kolom `orders.stock_location_id` dan `orders.stock_committed_at`.
 - Endpoint/Controller/Policy/Resource inventory.
-- Adjustment, transfer, stock receipt, retur.
+- Adjustment, transfer, stock receipt, retur (dan transfer antarlokasi).
 - Multi-satuan (`item_units`), BOM/resep, konsumsi bahan baku restoran.
 - Refund/retur otomatis (memerlukan aturan transaksi yang jelas).
+- Stock-in / saldo awal melalui API (saat ini saldo diisi manual/factory).
+- Reconciler saldo-dari-ledger.
+- Wiring provisioning lokasi default ke registrasi store baru.
 
 ---
 
-## 11. Batasan Checkpoint Ini
+## 12. Batasan
 
-- Belum ada cara memindahkan stok selain akses model langsung.
-- Belum ada penegakan tenant di level service untuk stok (baru rancangan).
-- Belum ada lock (`lockForUpdate`) di mana pun untuk stok; concurrency stok
-  akan diuji pada checkpoint service (SQLite tidak mendukung `FOR UPDATE`).
-- Migrasi baru **belum diterapkan** ke development database.
-- Reconciler saldo-dari-ledger belum ada.
+- **SQLite tidak mendukung `lockForUpdate`.** Suite SQLite memverifikasi
+  protokol, transaksi, dan rollback, bukan isolasi paralel sebenarnya.
+  Isolasi konkuren dibuktikan pada **harness MySQL** (`tests/Concurrency/`),
+  skenario 6 (berebut unit terakhir) & 7 (komit ganda), di database khusus
+  `saas_pos_concurrency_test` (terpisah dari development).
+- Migrasi inventory **belum diterapkan** ke development database (menunggu
+  persetujuan).
+- `commitForOrder`/`releaseForOrder`/`reserveForOrder` adalah jalur tulis utama;
+  mengubah saldo langsung lewat model melewati jaminan di atas.
+
