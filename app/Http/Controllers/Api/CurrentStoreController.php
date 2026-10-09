@@ -3,41 +3,53 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Store;
+use App\Services\CurrentStoreService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Laravel\Sanctum\PersonalAccessToken;
 
 class CurrentStoreController extends Controller
 {
+    public function __construct(
+        private readonly CurrentStoreService $currentStores,
+    ) {}
+
     /**
-     * Get current active store for the current Sanctum token.
+     * Get the current active store for the current Sanctum token.
      */
     public function show(Request $request): JsonResponse
     {
         $user = $request->user();
         $token = $user->currentAccessToken();
 
-        if (!$token || !$token->current_store_id) {
+        if (! $token instanceof PersonalAccessToken) {
             return response()->json([
-                'message' => 'Belum ada toko aktif.',
+                'message' => 'Endpoint ini memerlukan token API dengan konteks toko.',
+                'code' => 'token_required',
+            ], 401);
+        }
+
+        if ($token->current_store_id === null) {
+            return response()->json([
                 'data' => [
                     'current_store' => null,
                 ],
             ]);
         }
 
-        $store = $user->stores()
-            ->where('stores.id', $token->current_store_id)
-            ->where('stores.is_active', true)
-            ->wherePivot('is_active', true)
-            ->first();
+        $store = $this->currentStores->resolveForToken($user, $token);
 
-        if (!$store) {
-            $token->forceFill([
-                'current_store_id' => null,
-            ])->save();
+        /*
+         * The token references a store that is no longer accessible. Clear the
+         * stale reference so the client is forced to pick a valid store again.
+         */
+        if ($store === null) {
+            $this->currentStores->persist($token, null);
 
             return response()->json([
-                'message' => 'Toko aktif tidak ditemukan.',
+                'message' => 'Toko aktif tidak lagi tersedia.',
+                'code' => 'current_store_unavailable',
                 'data' => [
                     'current_store' => null,
                 ],
@@ -46,19 +58,13 @@ class CurrentStoreController extends Controller
 
         return response()->json([
             'data' => [
-                'current_store' => [
-                    'id' => $store->id,
-                    'name' => $store->name,
-                    'slug' => $store->slug,
-                    'role' => $store->pivot->role,
-                    'is_active' => $store->is_active,
-                ],
+                'current_store' => $this->transform($store),
             ],
         ]);
     }
 
     /**
-     * Change current active store for the current Sanctum token.
+     * Change the current active store for the current Sanctum token.
      */
     public function update(Request $request): JsonResponse
     {
@@ -66,57 +72,62 @@ class CurrentStoreController extends Controller
             'store_id' => [
                 'required',
                 'integer',
-                'exists:stores,id',
             ],
         ]);
 
         $user = $request->user();
-
-        /*
-         * Jangan hanya mengecek apakah store ada.
-         *
-         * Kita harus memastikan user memang memiliki
-         * membership aktif pada store tersebut.
-         */
-        $store = $user->stores()
-            ->where('stores.id', $validated['store_id'])
-            ->where('stores.is_active', true)
-            ->wherePivot('is_active', true)
-            ->first();
-
-        if (!$store) {
-            return response()->json([
-                'message' => 'Anda tidak memiliki akses ke toko tersebut.',
-            ], 403);
-        }
-
         $token = $user->currentAccessToken();
 
-        if (!$token) {
+        if (! $token instanceof PersonalAccessToken) {
             return response()->json([
-                'message' => 'Token akses tidak ditemukan.',
+                'message' => 'Endpoint ini memerlukan token API dengan konteks toko.',
+                'code' => 'token_required',
             ], 401);
         }
 
         /*
-         * Simpan store aktif ke Sanctum token.
+         * Access is resolved through the membership relation, never from the
+         * client-supplied value alone. A non-existent store and a store the
+         * user cannot access intentionally share the same response so tenant
+         * existence is not leaked.
          */
-        $token->forceFill([
-            'current_store_id' => $store->id,
-        ])->save();
+        $store = $this->currentStores->findAccessibleStore(
+            $user,
+            (int) $validated['store_id'],
+        );
+
+        if ($store === null) {
+            return response()->json([
+                'message' => 'Anda tidak memiliki akses ke toko tersebut.',
+                'code' => 'store_not_accessible',
+            ], 403);
+        }
+
+        /*
+         * Persist the selection on the requesting token only, so another
+         * device/token belonging to the same user is unaffected.
+         */
+        $this->currentStores->persist($token, $store->id);
 
         return response()->json([
             'message' => 'Toko aktif berhasil diubah.',
             'data' => [
-                'current_store' => [
-                    'id' => $store->id,
-                    'name' => $store->name,
-                    'slug' => $store->slug,
-                    'role' => $store->pivot->role,
-                    'is_active' => $store->is_active,
-                ],
+                'current_store' => $this->transform($store),
             ],
         ]);
     }
-}
 
+    /**
+     * @return array<string, mixed>
+     */
+    private function transform(Store $store): array
+    {
+        return [
+            'id' => $store->id,
+            'name' => $store->name,
+            'slug' => $store->slug,
+            'role' => $store->pivot->role,
+            'is_active' => $store->is_active,
+        ];
+    }
+}

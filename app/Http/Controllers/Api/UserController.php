@@ -13,6 +13,7 @@ class UserController extends Controller
         $user = $request->user();
 
         $stores = $user->stores()
+            ->where('stores.is_active', true)
             ->wherePivot('is_active', true)
             ->get()
             ->map(function ($store) {

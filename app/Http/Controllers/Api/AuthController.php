@@ -8,6 +8,7 @@ use App\Models\Plan;
 use App\Models\Store;
 use App\Models\Subscription;
 use App\Models\User;
+use App\Services\CurrentStoreService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -16,6 +17,11 @@ use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
+    public function __construct(
+        private readonly CurrentStoreService $currentStores,
+    ) {
+    }
+
     /**
      * Register user + first store + owner membership + free subscription.
      */
@@ -115,9 +121,10 @@ class AuthController extends Controller
                 'flutter-app'
             );
 
-            $accessToken->accessToken->forceFill([
-                'current_store_id' => $store->id,
-            ])->save();
+            $this->currentStores->persist(
+                $accessToken->accessToken,
+                $store->id,
+            );
 
             $token = $accessToken->plainTextToken;
 
@@ -222,9 +229,10 @@ class AuthController extends Controller
          * Jika user belum memiliki store aktif,
          * nilainya akan NULL.
          */
-        $accessToken->accessToken->forceFill([
-            'current_store_id' => $currentStore?->id,
-        ])->save();
+        $this->currentStores->persist(
+            $accessToken->accessToken,
+            $currentStore?->id,
+        );
 
         $token = $accessToken->plainTextToken;
 
