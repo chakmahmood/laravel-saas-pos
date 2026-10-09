@@ -36,6 +36,7 @@ class StockMovement extends Model
         'order_item_id',
         'reversal_of_id',
         'idempotency_key',
+        'request_fingerprint',
         'note',
         'created_by',
         'occurred_at',

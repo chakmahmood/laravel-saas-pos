@@ -7,12 +7,13 @@ use App\Models\StockMovement;
 use App\Models\User;
 
 /**
- * Authorizes read access to the inventory ledger.
+ * Authorizes access to the inventory ledger.
  *
- * The ledger is append-only and read-only through the API: any active member
- * (including a cashier) may read it, but there is no mutation ability to
- * authorize. Inventory capability is enforced by the
- * `EnsureInventoryEnabled` middleware.
+ * - read (viewAny/view) : any active member.
+ * - create              : owner/admin only (opening stock, receipt, adjustment).
+ *
+ * The ledger stays append-only: there is no update/delete ability at all.
+ * Inventory capability is enforced by the `EnsureInventoryEnabled` middleware.
  */
 class StockMovementPolicy
 {
@@ -25,6 +26,20 @@ class StockMovementPolicy
     {
         return $this->role() !== null
             && $movement->store_id === $this->currentStoreId();
+    }
+
+    public function create(User $user): bool
+    {
+        return $this->isManager();
+    }
+
+    private function isManager(): bool
+    {
+        return in_array(
+            $this->role(),
+            [StoreRole::OWNER, StoreRole::ADMIN],
+            true,
+        );
     }
 
     private function role(): ?StoreRole

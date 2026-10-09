@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Enums\StockMovementType;
 use App\Exceptions\OrderConflictException;
+use App\Models\Item;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\StockBalance;
@@ -12,9 +13,11 @@ use App\Models\StockMovement;
 use App\Models\Store;
 use App\Models\User;
 use App\Support\Quantity;
+use App\Support\StockMutationResult;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use InvalidArgumentException;
 
 /**
  * Inventory ledger write path for orders.
@@ -168,6 +171,207 @@ class StockLedgerService
             }
 
             $this->settleReservations($locked, $reservations, $actor, commit: false);
+        });
+    }
+
+    /**
+     * Record opening stock for an item/location pair that has no balance and no
+     * ledger history yet. Establishes the starting on-hand quantity exactly
+     * once; it can never be used to overwrite an existing balance.
+     *
+     * Idempotent per (store, idempotency_key): an identical retry returns the
+     * existing movement without touching stock again, while reusing the key
+     * with a different payload is rejected as a conflict.
+     *
+     * @throws OrderConflictException
+     */
+    public function recordOpening(
+        Store $store,
+        int $locationId,
+        int $itemId,
+        int|float|string $quantity,
+        string $idempotencyKey,
+        User $actor,
+        ?string $note = null,
+    ): StockMutationResult {
+        $millis = $this->positiveMillis($quantity);
+        $fingerprint = $this->fingerprint('opening', $store->getKey(), $locationId, $itemId, $millis, $note);
+
+        return DB::transaction(function () use ($store, $locationId, $itemId, $millis, $idempotencyKey, $actor, $note, $fingerprint) {
+            $this->lockStore($store);
+
+            $existing = $this->movementByKey($store->getKey(), $idempotencyKey);
+
+            if ($existing !== null) {
+                return $this->idempotentResult($store->getKey(), $existing, $fingerprint, $locationId, $itemId);
+            }
+
+            $location = $this->resolveLocation($store, $locationId);
+            $item = $this->resolveTrackedItem($store, $itemId);
+
+            $hasHistory = StockBalance::query()
+                ->where('store_id', $store->getKey())
+                ->where('stock_location_id', $location->getKey())
+                ->where('item_id', $item->getKey())
+                ->exists()
+                || StockMovement::query()
+                    ->where('store_id', $store->getKey())
+                    ->where('stock_location_id', $location->getKey())
+                    ->where('item_id', $item->getKey())
+                    ->exists();
+
+            if ($hasHistory) {
+                throw new OrderConflictException(
+                    'Saldo awal tidak dapat dicatat karena kombinasi item/lokasi ini sudah memiliki saldo atau riwayat stok.',
+                    'opening_stock_conflict',
+                );
+            }
+
+            $balance = StockBalance::query()->create([
+                'store_id' => $store->getKey(),
+                'stock_location_id' => $location->getKey(),
+                'item_id' => $item->getKey(),
+                'quantity_on_hand' => Quantity::fromMillis($millis),
+                'quantity_reserved' => 0,
+            ]);
+
+            $movement = $this->recordMovement([
+                'store_id' => $store->getKey(),
+                'stock_location_id' => $location->getKey(),
+                'item_id' => $item->getKey(),
+                'type' => StockMovementType::OPENING,
+                'quantity' => Quantity::fromMillis($millis),
+                'idempotency_key' => $idempotencyKey,
+                'request_fingerprint' => $fingerprint,
+                'created_by' => $actor->getKey(),
+                'note' => $note ?? 'Saldo awal',
+            ]);
+
+            return new StockMutationResult($balance->refresh(), $movement);
+        });
+    }
+
+    /**
+     * Record a manual stock receipt (goods in): increases on-hand only and
+     * never touches the reserved quantity.
+     *
+     * @throws OrderConflictException
+     */
+    public function recordReceipt(
+        Store $store,
+        int $locationId,
+        int $itemId,
+        int|float|string $quantity,
+        string $idempotencyKey,
+        User $actor,
+        ?string $reference = null,
+    ): StockMutationResult {
+        $millis = $this->positiveMillis($quantity);
+        $fingerprint = $this->fingerprint('receipt', $store->getKey(), $locationId, $itemId, $millis, $reference);
+
+        return DB::transaction(function () use ($store, $locationId, $itemId, $millis, $idempotencyKey, $actor, $reference, $fingerprint) {
+            $this->lockStore($store);
+
+            $existing = $this->movementByKey($store->getKey(), $idempotencyKey);
+
+            if ($existing !== null) {
+                return $this->idempotentResult($store->getKey(), $existing, $fingerprint, $locationId, $itemId);
+            }
+
+            $location = $this->resolveLocation($store, $locationId);
+            $item = $this->resolveTrackedItem($store, $itemId);
+
+            $balance = $this->lockOrCreateBalance($store->getKey(), $location->getKey(), $item->getKey());
+            $newOnHand = Quantity::toMillis($balance->quantity_on_hand) + $millis;
+
+            $this->setOnHand($balance, $newOnHand);
+
+            $movement = $this->recordMovement([
+                'store_id' => $store->getKey(),
+                'stock_location_id' => $location->getKey(),
+                'item_id' => $item->getKey(),
+                'type' => StockMovementType::PURCHASE_IN,
+                'quantity' => Quantity::fromMillis($millis),
+                'idempotency_key' => $idempotencyKey,
+                'request_fingerprint' => $fingerprint,
+                'created_by' => $actor->getKey(),
+                'note' => $reference,
+            ]);
+
+            return new StockMutationResult($balance->refresh(), $movement);
+        });
+    }
+
+    /**
+     * Correct stock against a physical count.
+     *
+     * The client sends the counted quantity (not a new balance), so the delta
+     * is always computed from the locked current on-hand. A count below the
+     * reserved quantity is rejected; the reservation is never modified here.
+     * A zero delta is a documented no-op with no movement written.
+     *
+     * @throws OrderConflictException
+     */
+    public function recordAdjustment(
+        Store $store,
+        int $locationId,
+        int $itemId,
+        int|float|string $countedQuantity,
+        string $idempotencyKey,
+        User $actor,
+        ?string $reason = null,
+    ): StockMutationResult {
+        $counted = $this->quantityMillis($countedQuantity);
+
+        if ($counted < 0) {
+            throw new OrderConflictException('Kuantitas hasil hitung tidak valid.', 'stock_invalid_quantity');
+        }
+
+        $fingerprint = $this->fingerprint('adjustment', $store->getKey(), $locationId, $itemId, $counted, $reason);
+
+        return DB::transaction(function () use ($store, $locationId, $itemId, $counted, $idempotencyKey, $actor, $reason, $fingerprint) {
+            $this->lockStore($store);
+
+            $existing = $this->movementByKey($store->getKey(), $idempotencyKey);
+
+            if ($existing !== null) {
+                return $this->idempotentResult($store->getKey(), $existing, $fingerprint, $locationId, $itemId);
+            }
+
+            $location = $this->resolveLocation($store, $locationId);
+            $item = $this->resolveTrackedItem($store, $itemId);
+
+            $balance = $this->lockOrCreateBalance($store->getKey(), $location->getKey(), $item->getKey());
+            $current = Quantity::toMillis($balance->quantity_on_hand);
+            $reserved = Quantity::toMillis($balance->quantity_reserved);
+            $delta = $counted - $current;
+
+            if ($delta === 0) {
+                return new StockMutationResult($balance->refresh(), null, idempotent: false, noOp: true);
+            }
+
+            if ($counted < $reserved) {
+                throw new OrderConflictException(
+                    'Hasil hitung fisik lebih rendah dari jumlah yang direservasi order; selesaikan atau batalkan order terlebih dahulu.',
+                    'adjustment_below_reserved',
+                );
+            }
+
+            $this->setOnHand($balance, $counted);
+
+            $movement = $this->recordMovement([
+                'store_id' => $store->getKey(),
+                'stock_location_id' => $location->getKey(),
+                'item_id' => $item->getKey(),
+                'type' => $delta > 0 ? StockMovementType::ADJUSTMENT_IN : StockMovementType::ADJUSTMENT_OUT,
+                'quantity' => Quantity::fromMillis(abs($delta)),
+                'idempotency_key' => $idempotencyKey,
+                'request_fingerprint' => $fingerprint,
+                'created_by' => $actor->getKey(),
+                'note' => $reason,
+            ]);
+
+            return new StockMutationResult($balance->refresh(), $movement);
         });
     }
 
@@ -450,5 +654,188 @@ class StockLedgerService
     private function orderItemKey(Order $order, ?int $orderItemId, string $event): string
     {
         return 'order:'.$order->getKey().':item:'.$orderItemId.':'.$event;
+    }
+
+    /**
+     * Serialize stock mutations per store, following the canonical lock order
+     * (store -> balance). This also makes the idempotency lookup race-safe.
+     */
+    private function lockStore(Store $store): void
+    {
+        Store::query()
+            ->whereKey($store->getKey())
+            ->lockForUpdate()
+            ->firstOrFail();
+    }
+
+    private function resolveLocation(Store $store, int $locationId): StockLocation
+    {
+        return $store->stockLocations()->findOrFail($locationId);
+    }
+
+    /**
+     * @throws OrderConflictException when the item does not track stock
+     */
+    private function resolveTrackedItem(Store $store, int $itemId): Item
+    {
+        $item = $store->items()->findOrFail($itemId);
+
+        if (! $item->tracks_stock) {
+            throw new OrderConflictException(
+                'Item ini tidak melacak stok.',
+                'inventory_item_not_tracked',
+            );
+        }
+
+        return $item;
+    }
+
+    private function lockOrCreateBalance(int $storeId, int $locationId, int $itemId): StockBalance
+    {
+        $balance = $this->lockBalance($storeId, $locationId, $itemId);
+
+        if ($balance !== null) {
+            return $balance;
+        }
+
+        try {
+            return StockBalance::query()->create([
+                'store_id' => $storeId,
+                'stock_location_id' => $locationId,
+                'item_id' => $itemId,
+                'quantity_on_hand' => 0,
+                'quantity_reserved' => 0,
+            ]);
+        } catch (QueryException $exception) {
+            if (! $this->isUniqueViolation($exception)) {
+                throw $exception;
+            }
+
+            $balance = $this->lockBalance($storeId, $locationId, $itemId);
+
+            if ($balance === null) {
+                throw $exception;
+            }
+
+            return $balance;
+        }
+    }
+
+    /**
+     * Set the physical on-hand quantity with a conditional atomic update. The
+     * guard re-checks the previous value and forbids dropping on-hand below the
+     * reserved quantity, so a lost update or a negative available can never
+     * slip through even if the row lock were bypassed.
+     *
+     * @throws OrderConflictException
+     */
+    private function setOnHand(StockBalance $balance, int $newOnHandMillis): void
+    {
+        $currentLiteral = Quantity::fromMillis(Quantity::toMillis($balance->quantity_on_hand));
+        $newLiteral = Quantity::fromMillis($newOnHandMillis);
+
+        $affected = DB::table('stock_balances')
+            ->where('id', $balance->getKey())
+            ->whereRaw("quantity_on_hand = {$currentLiteral}")
+            ->whereRaw("quantity_reserved <= {$newLiteral}")
+            ->update([
+                'quantity_on_hand' => DB::raw($newLiteral),
+                'updated_at' => now(),
+            ]);
+
+        if ($affected !== 1) {
+            throw new OrderConflictException(
+                'Saldo stok tidak konsisten saat memperbarui on-hand.',
+                'stock_inconsistent',
+            );
+        }
+    }
+
+    private function movementByKey(int $storeId, string $idempotencyKey): ?StockMovement
+    {
+        return StockMovement::query()
+            ->where('store_id', $storeId)
+            ->where('idempotency_key', $idempotencyKey)
+            ->first();
+    }
+
+    /**
+     * @throws OrderConflictException when the same key was used for a different payload
+     */
+    private function idempotentResult(
+        int $storeId,
+        StockMovement $existing,
+        string $fingerprint,
+        int $locationId,
+        int $itemId,
+    ): StockMutationResult {
+        if ($existing->request_fingerprint !== $fingerprint) {
+            throw new OrderConflictException(
+                'Idempotency key ini sudah dipakai untuk permintaan yang berbeda.',
+                'idempotency_conflict',
+            );
+        }
+
+        $balance = StockBalance::query()
+            ->where('store_id', $storeId)
+            ->where('stock_location_id', $locationId)
+            ->where('item_id', $itemId)
+            ->first();
+
+        if ($balance === null) {
+            throw new OrderConflictException(
+                'Saldo stok untuk permintaan idempotent tidak ditemukan.',
+                'stock_inconsistent',
+            );
+        }
+
+        return new StockMutationResult($balance, $existing, idempotent: true);
+    }
+
+    private function fingerprint(
+        string $operation,
+        int $storeId,
+        int $locationId,
+        int $itemId,
+        int $millis,
+        ?string $detail,
+    ): string {
+        return hash('sha256', implode('|', [
+            $operation,
+            $storeId,
+            $locationId,
+            $itemId,
+            $millis,
+            $detail ?? '',
+        ]));
+    }
+
+    private function positiveMillis(int|float|string $quantity): int
+    {
+        $millis = $this->quantityMillis($quantity);
+
+        if ($millis <= 0) {
+            throw new OrderConflictException('Kuantitas harus lebih besar dari nol.', 'stock_invalid_quantity');
+        }
+
+        return $millis;
+    }
+
+    private function quantityMillis(int|float|string $quantity): int
+    {
+        try {
+            return Quantity::toMillis($quantity);
+        } catch (InvalidArgumentException) {
+            throw new OrderConflictException('Kuantitas tidak valid.', 'stock_invalid_quantity');
+        }
+    }
+
+    private function isUniqueViolation(QueryException $exception): bool
+    {
+        $message = $exception->getMessage();
+
+        return str_contains($message, 'Duplicate entry')
+            || str_contains($message, 'UNIQUE constraint failed')
+            || (string) ($exception->errorInfo[0] ?? '') === '23000';
     }
 }

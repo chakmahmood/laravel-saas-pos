@@ -123,6 +123,66 @@ try {
 
             return ['location_id' => $location->id];
         })(),
+        'opening_stock' => (function () use ($payload) {
+            $store = Store::query()->findOrFail($payload['store_id']);
+            $user = User::query()->findOrFail($payload['user_id']);
+
+            $result = app(StockLedgerService::class)->recordOpening(
+                $store,
+                (int) $payload['location_id'],
+                (int) $payload['item_id'],
+                $payload['quantity'],
+                $payload['idempotency_key'],
+                $user,
+            );
+
+            return [
+                'movement_id' => $result->movement?->id,
+                'on_hand' => $result->balance->quantity_on_hand,
+                'idempotent' => $result->idempotent,
+                'no_op' => $result->noOp,
+            ];
+        })(),
+        'receipt' => (function () use ($payload) {
+            $store = Store::query()->findOrFail($payload['store_id']);
+            $user = User::query()->findOrFail($payload['user_id']);
+
+            $result = app(StockLedgerService::class)->recordReceipt(
+                $store,
+                (int) $payload['location_id'],
+                (int) $payload['item_id'],
+                $payload['quantity'],
+                $payload['idempotency_key'],
+                $user,
+            );
+
+            return [
+                'movement_id' => $result->movement?->id,
+                'on_hand' => $result->balance->quantity_on_hand,
+                'idempotent' => $result->idempotent,
+            ];
+        })(),
+        'adjustment' => (function () use ($payload) {
+            $store = Store::query()->findOrFail($payload['store_id']);
+            $user = User::query()->findOrFail($payload['user_id']);
+
+            $result = app(StockLedgerService::class)->recordAdjustment(
+                $store,
+                (int) $payload['location_id'],
+                (int) $payload['item_id'],
+                $payload['counted_quantity'],
+                $payload['idempotency_key'],
+                $user,
+                $payload['reason'] ?? 'race',
+            );
+
+            return [
+                'movement_id' => $result->movement?->id,
+                'on_hand' => $result->balance->quantity_on_hand,
+                'idempotent' => $result->idempotent,
+                'no_op' => $result->noOp,
+            ];
+        })(),
         default => throw new RuntimeException('unknown-scenario:'.$scenario),
     };
 

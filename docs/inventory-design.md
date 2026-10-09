@@ -1,12 +1,11 @@
 # Inventory & Stock Management — Design
 
-> Status: **Checkpoint 3 (Inventory API, Provisioning & Data Integrity)**.
-> Checkpoint 1 (fondasi DB/model/enum/relasi) + Checkpoint 2 (ledger service,
-> reservasi/komit/pelepasan terintegrasi `OrderService`) **plus** endpoint
-> inventory read/kelola lokasi, provisioning lokasi default pada registrasi
-> store, dan proteksi delete item/lokasi.
-> Balance dan movement **read-only**. Stock receipt, opening stock, adjustment,
-> transfer, dan return **belum tersedia**.
+> Status: **Checkpoint 4 (Stock In, Opening Stock, Adjustment & Item Config)**.
+> Checkpoint 1–3 (fondasi, ledger+order integration, API read/lokasi) **plus**
+> konfigurasi `tracks_stock` via API item, opening stock, stock receipt, dan
+> stock adjustment; idempotency per request; proteksi histori.
+> Transfer, retur, purchase order, supplier, multi-satuan, dan BOM **belum
+> tersedia**.
 > Dokumen ini menjelaskan apa yang **sudah** ada dan apa yang **sengaja ditunda**.
 >
 > API: `docs/inventory-api.md`.
@@ -95,7 +94,8 @@ Unique `(stock_location_id, item_id)`; index `(store_id, item_id)`.
 | `order_item_id` | FK order_items nullable | nullOnDelete |
 | `reversal_of_id` | FK stock_movements nullable | nullOnDelete (self) |
 | `idempotency_key` | string(120) nullable | **unique per store** |
-| `note` | string(255) nullable | |
+| `request_fingerprint` | string(64) nullable | hash payload (migrasi `000900`); bedakan retry identik vs konflik |
+| `note` | string(255) nullable | juga menyimpan reference/reason |
 | `created_by` | FK users nullable | nullOnDelete |
 | `occurred_at` | timestamp | default CURRENT_TIMESTAMP |
 | timestamps | | |
@@ -294,7 +294,7 @@ dibedakan.
 
 ---
 
-## 9. Inventory API (Checkpoint 3)
+## 9. Inventory API (Checkpoint 3) & Stock-In (Checkpoint 4)
 
 Semua endpoint berada di bawah `auth:sanctum` + `current.store` + gating
 `EnsureInventoryEnabled` (`BusinessType::usesInventory`). Detail lengkap:
@@ -308,7 +308,10 @@ Semua endpoint berada di bawah `auth:sanctum` + `current.store` + gating
   (tanpa float). GET tidak pernah membuat baris saldo. Item non-tracked pada
   `/items/{item}/stock` → 409 `inventory_item_not_tracked`.
 - **Ledger** (`/api/stock/movements`): **read-only**, filter item/lokasi/tipe/
-  rentang waktu/order, paginasi, eager loading. Tidak ada endpoint mutasi.
+  rentang waktu/order, paginasi, eager loading. Tidak ada endpoint mutasi
+  movement.
+- **Mutasi** (`/api/stock/opening-balances`, `/receipts`, `/adjustments`):
+  owner/admin saja, idempotent, satu transaksi. Lihat §9.3–§9.5.
 
 ### 9.1 Proteksi delete
 
@@ -325,6 +328,49 @@ Semua endpoint berada di bawah `auth:sanctum` + `current.store` + gating
 Middleware `EnsureInventoryEnabled` mengembalikan 403 `inventory_not_available`
 untuk store non-inventory pada **semua** endpoint inventory (termasuk read-only).
 
+### 9.3 Konfigurasi `tracks_stock` pada item
+
+- Create/update item menerima `tracks_stock` (boolean, default false). Item lama
+  tidak berubah otomatis.
+- `true` hanya untuk store `usesInventory()`; selain itu 403
+  `inventory_not_available`.
+- `true` → `false` ditolak (409 `item_inventory_in_use`) bila item punya saldo
+  atau movement; histori tidak pernah dihapus untuk memaksa perubahan.
+- Client tidak dapat mengirim `store_id`/saldo/lokasi/ledger/timestamp order.
+
+### 9.4 Opening / Receipt / Adjustment
+
+`StockLedgerService` menambah `recordOpening`, `recordReceipt`, dan
+`recordAdjustment`. Semua:
+
+- Di dalam transaksi, **mengunci baris store** dulu (lock order kanonik:
+  `store → balance`) lalu saldo, sehingga idempotency lookup dan update
+  terserialisasi per store.
+- Memvalidasi tenant (item/lokasi via relasi store → 404) dan `tracks_stock`.
+- Memakai `Quantity` integer-milli untuk semua aritmetika.
+- Mengunci/membuat baris balance, memakai conditional atomic `UPDATE`
+  (`quantity_on_hand = <nilai lama>` + `quantity_reserved <= <nilai baru>`) dan
+  memverifikasi affected rows.
+- Menulis movement append-only dengan `idempotency_key` + `request_fingerprint`.
+
+Aturan:
+- **Opening**: hanya bila belum ada saldo & movement untuk (lokasi,item);
+  set `on_hand = quantity`, `reserved` tetap 0; movement `opening`. Jika sudah
+  ada → 409 `opening_stock_conflict`.
+- **Receipt**: `on_hand += quantity` (membuat saldo bila belum ada), `reserved`
+  tidak berubah; movement `purchase_in`.
+- **Adjustment**: client mengirim `counted_quantity`; delta = counted − on_hand;
+  `adjustment_in`/`adjustment_out`; delta 0 → no-op tanpa movement; counted <
+  reserved → 409 `adjustment_below_reserved` (reservasi tidak dibatalkan).
+
+### 9.5 Idempotency & fingerprint
+
+- `idempotency_key` dari client, unik per store. Retry key+payload sama → 200
+  idempotent (movement sama, tanpa efek ganda). Key sama payload berbeda → 409
+  `idempotency_conflict` (dibedakan lewat `request_fingerprint`).
+- Payment, cash session, dan fulfillment order tidak pernah disentuh oleh
+  mutasi ini.
+
 ---
 
 ## 10. Keputusan Final
@@ -337,6 +383,9 @@ untuk store non-inventory pada **semua** endpoint inventory (termasuk read-only)
 - Lokasi default per store dijamin `default_guard`; provisioning idempotent dan
   terhubung ke registrasi store.
 - Tanpa DB CHECK untuk saldo (alasan portabilitas di §11).
+- **Checkpoint 4:** `tracks_stock` dapat dikonfigurasi via API item (default
+  false, gating business type, proteksi histori); opening stock, receipt, dan
+  adjustment tersedia (owner/admin, idempotent, fingerprint per request).
 
 ---
 
@@ -356,14 +405,11 @@ untuk store non-inventory pada **semua** endpoint inventory (termasuk read-only)
 
 ## 12. Ditunda (Belum Diimplementasikan)
 
-- Stock receipt / opening stock / adjustment (satu-satunya cara saat ini mengisi
-  saldo awal adalah factory/seeder/DB; belum ada API).
-- Transfer antarlokasi dan return.
+- Transfer antarlokasi dan return (customer/supplier).
+- Purchase order dan supplier management.
 - Multi-satuan (`item_units`), BOM/resep, konsumsi bahan baku restoran.
 - Refund/retur otomatis (memerlukan aturan transaksi yang jelas).
-- Konfigurasi `items.tracks_stock` melalui API item (saat ini di-set via
-  factory/DB), sehingga **retail end-to-end belum siap** tanpa stock-in.
-- Reconciler saldo-dari-ledger.
+- Reconciler saldo-dari-ledger otomatis.
 
 ---
 
@@ -372,9 +418,10 @@ untuk store non-inventory pada **semua** endpoint inventory (termasuk read-only)
 - **SQLite tidak mendukung `lockForUpdate`.** Suite SQLite memverifikasi
   protokol, transaksi, dan rollback, bukan isolasi paralel sebenarnya.
   Isolasi konkuren dibuktikan pada **harness MySQL** (`tests/Concurrency/`),
-  skenario 6 (berebut unit terakhir), 7 (komit ganda), & 8 (provisioning
-  bersamaan), di database khusus `saas_pos_concurrency_test` (terpisah dari
-  development).
+  skenario 6 (berebut unit terakhir), 7 (komit ganda), 8 (provisioning
+  bersamaan), 9 (opening race), 10 (receipt bersamaan), 11 (adjustment
+  bersamaan), & 12 (retry idempotent bersamaan), di database khusus
+  `saas_pos_concurrency_test` (terpisah dari development).
 - Migrasi inventory **belum diterapkan** ke development database (menunggu
   persetujuan).
 - `commitForOrder`/`releaseForOrder`/`reserveForOrder` adalah jalur tulis utama;

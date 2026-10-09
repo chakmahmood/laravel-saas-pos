@@ -11,6 +11,7 @@ use App\Http\Controllers\Api\PaymentController;
 use App\Http\Controllers\Api\StockBalanceController;
 use App\Http\Controllers\Api\StockLocationController;
 use App\Http\Controllers\Api\StockMovementController;
+use App\Http\Controllers\Api\StockMutationController;
 use App\Http\Controllers\Api\UserController;
 use App\Http\Middleware\EnsureInventoryEnabled;
 use Illuminate\Support\Facades\Route;
@@ -157,6 +158,21 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/stock/movements', [
                 StockMovementController::class,
                 'index',
+            ]);
+
+            Route::post('/stock/opening-balances', [
+                StockMutationController::class,
+                'openingBalance',
+            ]);
+
+            Route::post('/stock/receipts', [
+                StockMutationController::class,
+                'receipt',
+            ]);
+
+            Route::post('/stock/adjustments', [
+                StockMutationController::class,
+                'adjustment',
             ]);
 
             Route::get('/items/{item}/stock', [

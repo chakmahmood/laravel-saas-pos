@@ -134,8 +134,9 @@ payment/void.
 ### Phase 3B — Inventory & Stock Management
 
 **Checkpoint 1 (Inventory Foundation), Checkpoint 2 (Stock Ledger Service &
-Order Integration) & Checkpoint 3 (Inventory API, Provisioning & Data Integrity)
-selesai.** Detail desain: `docs/inventory-design.md`; API: `docs/inventory-api.md`.
+Order Integration), Checkpoint 3 (Inventory API, Provisioning & Data Integrity)
+& Checkpoint 4 (Stock In, Opening Stock, Adjustment & Item Config) selesai.**
+Detail desain: `docs/inventory-design.md`; API: `docs/inventory-api.md`.
 
 - [x] Migrasi `items.tracks_stock` (default false) + index.
 - [x] Migrasi `stock_locations` (jaminan portabel satu default per store via
@@ -169,12 +170,22 @@ selesai.** Detail desain: `docs/inventory-design.md`; API: `docs/inventory-api.m
 - [x] Proteksi delete item (`item_has_stock_history`) & lokasi
       (`default_stock_location_protected`, `stock_location_in_use`).
 - [x] Test fitur API + isolasi tenant + provisioning + proteksi delete.
-- [ ] **Checkpoint berikutnya:** stock receipt / opening stock / adjustment
-      (mutasi ledger via API) + konfigurasi `tracks_stock` per item.
-- [ ] Ditunda: transfer, retur, multi-satuan, BOM/resep, konsumsi bahan baku,
-      refund/retur otomatis.
+- [x] Konfigurasi `tracks_stock` via API item (default false, gating business
+      type, proteksi `item_inventory_in_use` saat ada histori).
+- [x] Migrasi aditif `stock_movements.request_fingerprint`.
+- [x] `StockLedgerService`: `recordOpening`, `recordReceipt`, `recordAdjustment`
+      (idempotent per request, lock `store → balance`, conditional update).
+- [x] Endpoint `POST /api/stock/opening-balances`, `/stock/receipts`,
+      `/stock/adjustments` (owner/admin).
+- [x] Test opening/receipt/adjustment (idempotency, konflik payload, rollback,
+      tenant, permission, adjustment di bawah reserved, no-op delta 0).
+- [x] Concurrency MySQL skenario 9–12 (opening race, receipt bersamaan,
+      adjustment bersamaan, retry idempotent bersamaan) — PASS.
+- [ ] **Checkpoint berikutnya:** transfer antarlokasi, retur, laporan stok.
+- [ ] Ditunda: purchase order, supplier, multi-satuan, BOM/resep, konsumsi bahan
+      baku, refund/retur otomatis.
 - [ ] Migrasi inventory belum diterapkan ke DB development (menunggu persetujuan).
-- [ ] Catatan: retail end-to-end belum siap sampai mekanisme stock-in tersedia.
+- [ ] Catatan: retail kini dapat mencatat stok via opening/receipt.
 
 ### Phase 3C — Laporan Penjualan
 

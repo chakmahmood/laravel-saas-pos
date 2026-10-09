@@ -90,7 +90,13 @@ class ItemController extends Controller
     {
         $store = $this->currentStore($request);
 
-        $item = $this->catalogItems->create($store, $request->itemAttributes());
+        $attributes = $request->itemAttributes();
+
+        if (($attributes['tracks_stock'] ?? false) === true && ! $store->business_type->usesInventory()) {
+            return $this->inventoryUnavailableResponse();
+        }
+
+        $item = $this->catalogItems->create($store, $attributes);
 
         return (new ItemResource($item))
             ->additional(['message' => 'Item berhasil dibuat.'])
@@ -118,9 +124,26 @@ class ItemController extends Controller
      */
     public function update(UpdateItemRequest $request, string $item): JsonResponse
     {
+        $store = $this->currentStore($request);
         $model = $this->resolveItem($request, $item);
 
-        $model->update($request->itemAttributes());
+        $attributes = $request->itemAttributes();
+
+        if (array_key_exists('tracks_stock', $attributes)) {
+            if ($attributes['tracks_stock'] === true && ! $store->business_type->usesInventory()) {
+                return $this->inventoryUnavailableResponse();
+            }
+
+            if (
+                $attributes['tracks_stock'] === false
+                && $model->tracks_stock
+                && ($model->stockBalances()->exists() || $model->stockMovements()->exists())
+            ) {
+                return $this->itemInventoryInUseResponse();
+            }
+        }
+
+        $model->update($attributes);
 
         return (new ItemResource($model->refresh()))
             ->additional(['message' => 'Item berhasil diperbarui.'])
@@ -167,6 +190,22 @@ class ItemController extends Controller
         return response()->json([
             'message' => 'Item memiliki riwayat stok dan tidak dapat dihapus. Nonaktifkan item untuk menghentikan penggunaannya.',
             'code' => 'item_has_stock_history',
+        ], 409);
+    }
+
+    private function inventoryUnavailableResponse(): JsonResponse
+    {
+        return response()->json([
+            'message' => 'Fitur inventory tidak tersedia untuk toko ini.',
+            'code' => 'inventory_not_available',
+        ], 403);
+    }
+
+    private function itemInventoryInUseResponse(): JsonResponse
+    {
+        return response()->json([
+            'message' => 'Item tidak dapat berhenti melacak stok karena sudah memiliki saldo atau riwayat stok.',
+            'code' => 'item_inventory_in_use',
         ], 409);
     }
 

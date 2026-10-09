@@ -28,6 +28,7 @@ class ItemResource extends JsonResource
             'selling_price' => $this->selling_price,
             'unit' => $this->unit,
             'is_active' => $this->is_active,
+            'tracks_stock' => $this->tracks_stock,
             'created_at' => $this->created_at?->toISOString(),
             'updated_at' => $this->updated_at?->toISOString(),
         ];

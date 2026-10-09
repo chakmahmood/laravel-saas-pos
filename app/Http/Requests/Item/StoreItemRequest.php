@@ -56,6 +56,7 @@ class StoreItemRequest extends FormRequest
             'selling_price' => ['required', 'integer', 'min:0', 'max:999999999999999'],
             'unit' => ['nullable', 'string', 'max:20'],
             'is_active' => ['sometimes', 'boolean'],
+            'tracks_stock' => ['sometimes', 'boolean'],
         ];
     }
 
@@ -81,6 +82,7 @@ class StoreItemRequest extends FormRequest
             'selling_price' => (int) $this->input('selling_price'),
             'unit' => $this->filled('unit') ? $this->string('unit')->toString() : 'pcs',
             'is_active' => $this->boolean('is_active', true),
+            'tracks_stock' => $this->boolean('tracks_stock', false),
         ];
     }
 

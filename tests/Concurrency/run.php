@@ -13,6 +13,10 @@
  *   6. Two orders racing for the last unit: exactly one reserves it.
  *   7. Concurrent commits of one order: exactly one commit is effective.
  *   8. Concurrent default-location provisioning: exactly one default is created.
+ *   9. Concurrent opening stock for the same item/location: only one effective.
+ *  10. Concurrent receipts (distinct keys): no lost update, correct total.
+ *  11. Concurrent adjustments: delta computed against the locked balance.
+ *  12. Concurrent receipts with the same idempotency key: exactly one effect.
  *
  * Usage:
  *   php tests/Concurrency/run.php
@@ -118,6 +122,31 @@ function makeInventoryStore(string $label, string $onHand): array
         'item_id' => $item->id,
         'quantity_on_hand' => $onHand,
         'quantity_reserved' => 0,
+    ]);
+
+    return [$store, $owner, $item, $location];
+}
+
+/**
+ * Inventory store with a default location and one stock-tracked item that has
+ * NO balance and no ledger history yet (for opening-stock scenarios).
+ *
+ * @return array{0: Store, 1: User, 2: Item, 3: StockLocation}
+ */
+function makeInventoryStoreNoBalance(string $label): array
+{
+    [$store, $owner] = makeStore($label, withShift: false, businessType: 'retail');
+
+    $location = app(StockLocationProvisioner::class)->ensureDefaultForStore($store);
+
+    $item = Item::create([
+        'store_id' => $store->id,
+        'name' => 'Tracked '.$label,
+        'type' => 'product',
+        'selling_price' => 10000,
+        'unit' => 'pcs',
+        'tracks_stock' => true,
+        'is_active' => true,
     ]);
 
     return [$store, $owner, $item, $location];
@@ -573,6 +602,183 @@ printf(
 
 if ($successes !== $n || $distinctLocationIds !== 1 || $defaultsInDb !== 1) {
     $failures[] = "provision race: expected {$n} successes converging on 1 default, got successes={$successes} distinct={$distinctLocationIds} defaults={$defaultsInDb}";
+}
+
+/* ------------------------------- scenario 9: opening stock race */
+
+echo "\n== Scenario 9: concurrent opening stock (same item/location) ==\n";
+[$store9, $owner9, $item9, $location9] = makeInventoryStoreNoBalance('opening');
+
+$payload9 = [
+    'store_id' => $store9->id,
+    'user_id' => $owner9->id,
+    'location_id' => $location9->id,
+    'item_id' => $item9->id,
+    'quantity' => '5.000',
+];
+$payloads9 = [
+    $payload9 + ['idempotency_key' => 'sc9-a'],
+    $payload9 + ['idempotency_key' => 'sc9-b'],
+];
+[, $results] = runConcurrent(2, 'opening_stock', $payloads9, $database);
+
+$successes = 0;
+$conflicts = 0;
+foreach ($results as $r) {
+    if (($r['ok'] ?? false) === true) {
+        $successes++;
+    } elseif (($r['kind'] ?? '') === 'conflict') {
+        $conflicts++;
+    }
+}
+$balance9 = StockBalance::query()->where('store_id', $store9->id)->where('item_id', $item9->id)->first();
+$openings9 = StockMovement::query()
+    ->where('store_id', $store9->id)
+    ->where('item_id', $item9->id)
+    ->where('type', 'opening')
+    ->count();
+
+printf(
+    "  successes=%d conflicts=%d on_hand=%s openings=%d\n",
+    $successes,
+    $conflicts,
+    $balance9?->quantity_on_hand ?? 'null',
+    $openings9,
+);
+
+if ($successes !== 1 || $conflicts !== 1) {
+    $failures[] = "opening race: expected exactly one opening to succeed, got successes={$successes} conflicts={$conflicts}";
+}
+if ($openings9 !== 1 || (string) $balance9?->quantity_on_hand !== '5.000') {
+    $failures[] = "opening race: expected a single opening of 5.000, got openings={$openings9} on_hand=".($balance9?->quantity_on_hand ?? 'null');
+}
+
+/* --------------------------- scenario 10: concurrent receipts (distinct) */
+
+echo "\n== Scenario 10: concurrent receipts (distinct keys) ==\n";
+[$store10, $owner10, $item10, $location10] = makeInventoryStoreNoBalance('receipt');
+
+$base10 = [
+    'store_id' => $store10->id,
+    'user_id' => $owner10->id,
+    'location_id' => $location10->id,
+    'item_id' => $item10->id,
+];
+$payloads10 = [
+    $base10 + ['quantity' => '5.000', 'idempotency_key' => 'sc10-a'],
+    $base10 + ['quantity' => '7.000', 'idempotency_key' => 'sc10-b'],
+];
+[, $results] = runConcurrent(2, 'receipt', $payloads10, $database);
+
+$successes = 0;
+foreach ($results as $r) {
+    if (($r['ok'] ?? false) === true) {
+        $successes++;
+    }
+}
+$balance10 = StockBalance::query()->where('store_id', $store10->id)->where('item_id', $item10->id)->first();
+$receipts10 = StockMovement::query()
+    ->where('store_id', $store10->id)
+    ->where('item_id', $item10->id)
+    ->where('type', 'purchase_in')
+    ->count();
+
+printf(
+    "  successes=%d on_hand=%s receipts=%d\n",
+    $successes,
+    $balance10?->quantity_on_hand ?? 'null',
+    $receipts10,
+);
+
+if ($successes !== 2 || (string) $balance10?->quantity_on_hand !== '12.000' || $receipts10 !== 2) {
+    $failures[] = "receipts: expected 2 receipts totalling 12.000, got successes={$successes} on_hand=".($balance10?->quantity_on_hand ?? 'null')." receipts={$receipts10}";
+}
+
+/* ------------------- scenario 11: concurrent adjustments (same count) */
+
+echo "\n== Scenario 11: concurrent adjustments (same counted quantity) ==\n";
+[$store11, $owner11, $item11, $location11] = makeInventoryStore('adjust', '100.000');
+
+$base11 = [
+    'store_id' => $store11->id,
+    'user_id' => $owner11->id,
+    'location_id' => $location11->id,
+    'item_id' => $item11->id,
+    'counted_quantity' => '120.000',
+];
+$payloads11 = [
+    $base11 + ['idempotency_key' => 'sc11-a'],
+    $base11 + ['idempotency_key' => 'sc11-b'],
+];
+[, $results] = runConcurrent(2, 'adjustment', $payloads11, $database);
+
+$successes = 0;
+foreach ($results as $r) {
+    if (($r['ok'] ?? false) === true) {
+        $successes++;
+    }
+}
+$balance11 = StockBalance::query()->where('store_id', $store11->id)->where('item_id', $item11->id)->first();
+$adjustments11 = StockMovement::query()
+    ->where('store_id', $store11->id)
+    ->where('item_id', $item11->id)
+    ->whereIn('type', ['adjustment_in', 'adjustment_out'])
+    ->count();
+$adjustSum11 = (float) StockMovement::query()
+    ->where('store_id', $store11->id)
+    ->where('item_id', $item11->id)
+    ->whereIn('type', ['adjustment_in', 'adjustment_out'])
+    ->sum('quantity');
+
+printf(
+    "  successes=%d on_hand=%s adjustments=%d adjustment_sum=%.3f\n",
+    $successes,
+    $balance11?->quantity_on_hand ?? 'null',
+    $adjustments11,
+    $adjustSum11,
+);
+
+if ($successes !== 2 || (string) $balance11?->quantity_on_hand !== '120.000' || $adjustments11 !== 1 || abs($adjustSum11 - 20.0) > 0.0001) {
+    $failures[] = "adjustments: expected on_hand=120.000 with one effective +20.000, got successes={$successes} on_hand=".($balance11?->quantity_on_hand ?? 'null')." adjustments={$adjustments11} sum={$adjustSum11}";
+}
+
+/* ----------------- scenario 12: concurrent receipts (same idempotency key) */
+
+echo "\n== Scenario 12: concurrent receipts with the same idempotency key ==\n";
+[$store12, $owner12, $item12, $location12] = makeInventoryStoreNoBalance('retrysame');
+
+$shared12 = [
+    'store_id' => $store12->id,
+    'user_id' => $owner12->id,
+    'location_id' => $location12->id,
+    'item_id' => $item12->id,
+    'quantity' => '5.000',
+    'idempotency_key' => 'sc12-shared',
+];
+[, $results] = runConcurrent(2, 'receipt', [$shared12, $shared12], $database);
+
+$successes = 0;
+foreach ($results as $r) {
+    if (($r['ok'] ?? false) === true) {
+        $successes++;
+    }
+}
+$balance12 = StockBalance::query()->where('store_id', $store12->id)->where('item_id', $item12->id)->first();
+$receipts12 = StockMovement::query()
+    ->where('store_id', $store12->id)
+    ->where('item_id', $item12->id)
+    ->where('type', 'purchase_in')
+    ->count();
+
+printf(
+    "  successes=%d on_hand=%s receipts=%d\n",
+    $successes,
+    $balance12?->quantity_on_hand ?? 'null',
+    $receipts12,
+);
+
+if ($successes !== 2 || (string) $balance12?->quantity_on_hand !== '5.000' || $receipts12 !== 1) {
+    $failures[] = "shared-key receipts: expected a single effect of 5.000, got successes={$successes} on_hand=".($balance12?->quantity_on_hand ?? 'null')." receipts={$receipts12}";
 }
 
 /* ------------------------------------------------------------- summary */

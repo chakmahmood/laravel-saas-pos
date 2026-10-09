@@ -76,6 +76,7 @@ class UpdateItemRequest extends FormRequest
             'selling_price' => $sellingPrice,
             'unit' => ['nullable', 'string', 'max:20'],
             'is_active' => ['sometimes', 'boolean'],
+            'tracks_stock' => ['sometimes', 'boolean'],
         ];
     }
 
@@ -91,6 +92,10 @@ class UpdateItemRequest extends FormRequest
 
         if ($this->has('is_active')) {
             $data['is_active'] = $this->boolean('is_active');
+        }
+
+        if ($this->has('tracks_stock')) {
+            $data['tracks_stock'] = $this->boolean('tracks_stock');
         }
 
         if (array_key_exists('category_id', $data)) {
