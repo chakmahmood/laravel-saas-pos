@@ -10,6 +10,7 @@ use App\Models\Store;
 use App\Models\Subscription;
 use App\Models\User;
 use App\Services\CurrentStoreService;
+use App\Services\StockLocationProvisioner;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -21,6 +22,7 @@ class AuthController extends Controller
 {
     public function __construct(
         private readonly CurrentStoreService $currentStores,
+        private readonly StockLocationProvisioner $stockLocations,
     ) {}
 
     /**
@@ -94,6 +96,15 @@ class AuthController extends Controller
                 'business_type' => $validated['business_type']
                     ?? BusinessType::OTHER->value,
             ]);
+
+            /*
+             * Official default-stock-location provisioning for inventory-capable
+             * stores. Idempotent and race-safe; skipped for business types that
+             * do not use inventory. Never done implicitly during checkout.
+             */
+            if ($store->business_type->usesInventory()) {
+                $this->stockLocations->ensureDefaultForStore($store);
+            }
 
             /*
              * 3. Create owner membership.

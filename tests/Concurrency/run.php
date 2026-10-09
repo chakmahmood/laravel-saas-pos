@@ -12,6 +12,7 @@
  *   5. Only one open shift per cashier/store.
  *   6. Two orders racing for the last unit: exactly one reserves it.
  *   7. Concurrent commits of one order: exactly one commit is effective.
+ *   8. Concurrent default-location provisioning: exactly one default is created.
  *
  * Usage:
  *   php tests/Concurrency/run.php
@@ -537,6 +538,41 @@ if ((string) $balance7->quantity_on_hand !== '3.000' || (string) $balance7->quan
 }
 if ($sales7 !== 1 || $releases7 !== 1) {
     $failures[] = "double commit: expected exactly one sale_out and one reservation_release, got sale={$sales7} release={$releases7}";
+}
+
+/* --------------------------------- scenario 8: location provisioning race */
+
+echo "\n== Scenario 8: concurrent default-location provisioning ==\n";
+[$store8] = makeStore('prov', withShift: false, businessType: 'retail');
+
+$n = 6;
+$payload = ['store_id' => $store8->id];
+[, $results] = runConcurrent($n, 'provision_location', array_fill(0, $n, $payload), $database);
+
+$successes = 0;
+$locationIds = [];
+foreach ($results as $r) {
+    if (($r['ok'] ?? false) === true) {
+        $successes++;
+        $locationIds[] = $r['result']['location_id'];
+    }
+}
+
+$defaultsInDb = StockLocation::query()
+    ->where('store_id', $store8->id)
+    ->where('is_default', true)
+    ->count();
+$distinctLocationIds = count(array_unique($locationIds));
+
+printf(
+    "  successes=%d distinct_location_ids=%d defaults_in_db=%d\n",
+    $successes,
+    $distinctLocationIds,
+    $defaultsInDb,
+);
+
+if ($successes !== $n || $distinctLocationIds !== 1 || $defaultsInDb !== 1) {
+    $failures[] = "provision race: expected {$n} successes converging on 1 default, got successes={$successes} distinct={$distinctLocationIds} defaults={$defaultsInDb}";
 }
 
 /* ------------------------------------------------------------- summary */

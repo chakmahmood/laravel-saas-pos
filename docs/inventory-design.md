@@ -1,13 +1,15 @@
 # Inventory & Stock Management — Design
 
-> Status: **Checkpoint 2 (Stock Ledger Service & Order Integration)**.
-> Checkpoint 1 (fondasi DB/model/enum/relasi/provisioning) **plus** ledger
-> service, reservasi saat order dibuat, komit saat `completed`, pelepasan saat
-> `cancelled` (sebelum komit), idempotency, validasi tenant, dan integrasi
-> `OrderService`.
-> Belum ada endpoint inventory, adjustment, transfer, receipt, atau return.
+> Status: **Checkpoint 3 (Inventory API, Provisioning & Data Integrity)**.
+> Checkpoint 1 (fondasi DB/model/enum/relasi) + Checkpoint 2 (ledger service,
+> reservasi/komit/pelepasan terintegrasi `OrderService`) **plus** endpoint
+> inventory read/kelola lokasi, provisioning lokasi default pada registrasi
+> store, dan proteksi delete item/lokasi.
+> Balance dan movement **read-only**. Stock receipt, opening stock, adjustment,
+> transfer, dan return **belum tersedia**.
 > Dokumen ini menjelaskan apa yang **sudah** ada dan apa yang **sengaja ditunda**.
 >
+> API: `docs/inventory-api.md`.
 > Pendamping: `docs/universal-pos-architecture.md`, `docs/universal-pos-roadmap.md`.
 
 ---
@@ -170,29 +172,32 @@ Helper arah pada enum (kontrak untuk ledger service nanti):
 
 ---
 
-## 7. Backfill / Provisioning Lokasi Default
+## 7. Provisioning Lokasi Default
 
 **Pilihan: service provisioning + artisan command** (bukan migration/seeder).
 
-Alasan:
-- Migrasi di proyek ini murni DDL dan tidak menyentuh data tenant.
-- Seeder di sini untuk data referensi global (plans), bukan backfill per tenant.
-- Logika provisioning dipakai ulang untuk store baru saat registrasi pada
-  checkpoint berikutnya, sekaligus aman dijalankan berulang.
-
 Implementasi:
-- `App\Services\StockLocationProvisioner::ensureDefaultForStore(Store)` —
-  idempotent; menangani race lewat unique `default_guard` (pihak yang kalah
-  mengembalikan baris pemenang).
-- `App\Services\StockLocationProvisioner::provisionMissingLocations()` —
-  memproses semua store yang belum punya default (chunked).
+- `App\Services\StockLocationProvisioner::ensureDefaultForStore(Store)`:
+  - Menjalankan transaksi dan **mengunci baris store** (`lockForUpdate`) lebih
+    dulu, sehingga provisioning per store terserialisasi (lock order kanonik:
+    store dulu). Ini menghilangkan race duplicate-insert.
+  - Idempotent; unique `default_guard` tetap menjadi backstop database.
+  - Bila unique violation tetap terjadi (pemanggil melewatkan lock), recovery
+    memakai **locking read** (`FOR UPDATE`) karena MySQL default REPEATABLE READ
+    tidak melihat baris yang commit setelah snapshot.
+  - `DB::transaction(..., 3)` untuk retry deadlock sementara.
+- `provisionMissingLocations()` — memproses hanya store yang **mendukung
+  inventory** (`BusinessType::usesInventory`) dan belum punya default (chunked).
 - `php artisan stock:provision-locations` — command tipis yang memanggilnya.
+- **Registrasi store** (`AuthController::register`) memanggil
+  `ensureDefaultForStore` **di dalam transaksi registrasi** bila store mendukung
+  inventory. Store non-inventory **tidak** mendapat lokasi inventory.
 
 Sifat:
-- Idempotent (dijalankan berulang tidak membuat duplikat).
-- Tidak mengubah histori order.
-- Tidak mengaktifkan `tracks_stock`.
-- Tidak membuat saldo palsu.
+- Idempotent; dua proses bersamaan menghasilkan tepat satu default
+  (dibuktikan pada harness MySQL skenario 8).
+- Tidak mengubah histori order; tidak mengaktifkan `tracks_stock`; tidak membuat
+  saldo palsu.
 - **Belum dijalankan** terhadap development database (menunggu persetujuan).
 
 ---
@@ -289,19 +294,53 @@ dibedakan.
 
 ---
 
-## 9. Keputusan Final
+## 9. Inventory API (Checkpoint 3)
+
+Semua endpoint berada di bawah `auth:sanctum` + `current.store` + gating
+`EnsureInventoryEnabled` (`BusinessType::usesInventory`). Detail lengkap:
+`docs/inventory-api.md`.
+
+- **Lokasi** (`/api/stock/locations`): list/create/show/update/delete.
+  Owner/admin kelola; cashier baca. `store_id`, `is_default`, `default_guard`
+  tidak pernah diambil dari input. Lokasi tenant lain → 404.
+- **Saldo** (`/api/stock/balances`, `/api/items/{item}/stock`): **read-only**.
+  Hanya saldo item `tracks_stock = true`; `quantity_available` dihitung eksak
+  (tanpa float). GET tidak pernah membuat baris saldo. Item non-tracked pada
+  `/items/{item}/stock` → 409 `inventory_item_not_tracked`.
+- **Ledger** (`/api/stock/movements`): **read-only**, filter item/lokasi/tipe/
+  rentang waktu/order, paginasi, eager loading. Tidak ada endpoint mutasi.
+
+### 9.1 Proteksi delete
+
+- **Item** dengan saldo atau movement → 409 `item_has_stock_history` (FK
+  RESTRICT sebagai backstop; tidak ada cascade ke ledger). Item tanpa histori
+  tetap dapat dihapus; menghentikan penggunaan item = nonaktifkan.
+- **Lokasi** default aktif → 409 `default_stock_location_protected`.
+  Lokasi dengan saldo/movement atau direferensikan order → 409
+  `stock_location_in_use`. Validasi domain dijalankan sebelum delete; FK adalah
+  backstop.
+
+### 9.2 Gating capability
+
+Middleware `EnsureInventoryEnabled` mengembalikan 403 `inventory_not_available`
+untuk store non-inventory pada **semua** endpoint inventory (termasuk read-only).
+
+---
+
+## 10. Keputusan Final
 
 - Ledger + saldo + lokasi dengan skema Checkpoint 1.
 - `tracks_stock` default `false`; order non-inventory tidak berubah perilaku.
 - `available = on_hand - reserved`.
 - Order membuat reservasi; `completed` mengommit; `cancelled` (sebelum komit)
   melepas; void pembayaran tidak mengubah stok. **Terimplementasi (Checkpoint 2).**
-- Lokasi default per store dijamin `default_guard`; provisioning idempotent.
-- Tanpa DB CHECK untuk saldo (alasan portabilitas di §10).
+- Lokasi default per store dijamin `default_guard`; provisioning idempotent dan
+  terhubung ke registrasi store.
+- Tanpa DB CHECK untuk saldo (alasan portabilitas di §11).
 
 ---
 
-## 10. Mengapa Tanpa Constraint CHECK Saldo di Database
+## 11. Mengapa Tanpa Constraint CHECK Saldo di Database
 
 - `Illuminate\Database\Schema\Blueprint` tidak punya API `check` portabel.
 - SQLite tidak mendukung `ALTER TABLE ... ADD CONSTRAINT`; CHECK hanya bisa
@@ -315,25 +354,27 @@ dibedakan.
 
 ---
 
-## 11. Ditunda (Belum Diimplementasikan)
+## 12. Ditunda (Belum Diimplementasikan)
 
-- Endpoint/Controller/Policy/Resource inventory.
-- Adjustment, transfer, stock receipt, retur (dan transfer antarlokasi).
+- Stock receipt / opening stock / adjustment (satu-satunya cara saat ini mengisi
+  saldo awal adalah factory/seeder/DB; belum ada API).
+- Transfer antarlokasi dan return.
 - Multi-satuan (`item_units`), BOM/resep, konsumsi bahan baku restoran.
 - Refund/retur otomatis (memerlukan aturan transaksi yang jelas).
-- Stock-in / saldo awal melalui API (saat ini saldo diisi manual/factory).
+- Konfigurasi `items.tracks_stock` melalui API item (saat ini di-set via
+  factory/DB), sehingga **retail end-to-end belum siap** tanpa stock-in.
 - Reconciler saldo-dari-ledger.
-- Wiring provisioning lokasi default ke registrasi store baru.
 
 ---
 
-## 12. Batasan
+## 13. Batasan
 
 - **SQLite tidak mendukung `lockForUpdate`.** Suite SQLite memverifikasi
   protokol, transaksi, dan rollback, bukan isolasi paralel sebenarnya.
   Isolasi konkuren dibuktikan pada **harness MySQL** (`tests/Concurrency/`),
-  skenario 6 (berebut unit terakhir) & 7 (komit ganda), di database khusus
-  `saas_pos_concurrency_test` (terpisah dari development).
+  skenario 6 (berebut unit terakhir), 7 (komit ganda), & 8 (provisioning
+  bersamaan), di database khusus `saas_pos_concurrency_test` (terpisah dari
+  development).
 - Migrasi inventory **belum diterapkan** ke development database (menunggu
   persetujuan).
 - `commitForOrder`/`releaseForOrder`/`reserveForOrder` adalah jalur tulis utama;

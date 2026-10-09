@@ -10,6 +10,7 @@ use App\Http\Resources\ItemResource;
 use App\Models\Item;
 use App\Models\Store;
 use App\Services\CatalogItemService;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -128,6 +129,13 @@ class ItemController extends Controller
 
     /**
      * Delete an item of the current store.
+     *
+     * An item that already has stock history (balances or ledger movements)
+     * cannot be deleted: doing so would corrupt the inventory audit trail. The
+     * relation is checked first for a clean 409; the RESTRICT foreign keys on
+     * the inventory tables are the backstop and their violation is translated
+     * into the same 409. To stop using an item without touching history, set it
+     * inactive instead.
      */
     public function destroy(Request $request, string $item): JsonResponse
     {
@@ -135,11 +143,39 @@ class ItemController extends Controller
 
         Gate::authorize('delete', $model);
 
-        $model->delete();
+        if ($model->stockBalances()->exists() || $model->stockMovements()->exists()) {
+            return $this->itemHasStockHistoryResponse();
+        }
+
+        try {
+            $model->delete();
+        } catch (QueryException $exception) {
+            if ($this->isForeignKeyViolation($exception)) {
+                return $this->itemHasStockHistoryResponse();
+            }
+
+            throw $exception;
+        }
 
         return response()->json([
             'message' => 'Item berhasil dihapus.',
         ]);
+    }
+
+    private function itemHasStockHistoryResponse(): JsonResponse
+    {
+        return response()->json([
+            'message' => 'Item memiliki riwayat stok dan tidak dapat dihapus. Nonaktifkan item untuk menghentikan penggunaannya.',
+            'code' => 'item_has_stock_history',
+        ], 409);
+    }
+
+    private function isForeignKeyViolation(QueryException $exception): bool
+    {
+        $driverCode = $exception->errorInfo[1] ?? null;
+
+        return $driverCode === 1451
+            || str_contains(strtolower($exception->getMessage()), 'foreign key');
     }
 
     /**

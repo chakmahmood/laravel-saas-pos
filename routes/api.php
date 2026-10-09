@@ -8,7 +8,11 @@ use App\Http\Controllers\Api\CustomerController;
 use App\Http\Controllers\Api\ItemController;
 use App\Http\Controllers\Api\OrderController;
 use App\Http\Controllers\Api\PaymentController;
+use App\Http\Controllers\Api\StockBalanceController;
+use App\Http\Controllers\Api\StockLocationController;
+use App\Http\Controllers\Api\StockMovementController;
 use App\Http\Controllers\Api\UserController;
+use App\Http\Middleware\EnsureInventoryEnabled;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('auth')->group(function () {
@@ -108,6 +112,58 @@ Route::middleware('auth:sanctum')->group(function () {
             ItemController::class,
             'destroy',
         ]);
+
+        /*
+         * Inventory endpoints. They require an inventory-capable store; the
+         * capability is enforced by EnsureInventoryEnabled (403 with a stable
+         * code) so it is never spread across individual controllers.
+         */
+        Route::middleware(EnsureInventoryEnabled::class)->group(function () {
+            Route::get('/stock/locations', [
+                StockLocationController::class,
+                'index',
+            ]);
+
+            Route::post('/stock/locations', [
+                StockLocationController::class,
+                'store',
+            ]);
+
+            Route::get('/stock/locations/{stockLocation}', [
+                StockLocationController::class,
+                'show',
+            ]);
+
+            Route::put('/stock/locations/{stockLocation}', [
+                StockLocationController::class,
+                'update',
+            ]);
+
+            Route::patch('/stock/locations/{stockLocation}', [
+                StockLocationController::class,
+                'update',
+            ]);
+
+            Route::delete('/stock/locations/{stockLocation}', [
+                StockLocationController::class,
+                'destroy',
+            ]);
+
+            Route::get('/stock/balances', [
+                StockBalanceController::class,
+                'index',
+            ]);
+
+            Route::get('/stock/movements', [
+                StockMovementController::class,
+                'index',
+            ]);
+
+            Route::get('/items/{item}/stock', [
+                StockBalanceController::class,
+                'forItem',
+            ]);
+        });
 
         Route::get('/customers', [
             CustomerController::class,

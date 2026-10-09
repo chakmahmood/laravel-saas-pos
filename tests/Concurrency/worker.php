@@ -22,6 +22,7 @@ use App\Services\CatalogItemService;
 use App\Services\OrderService;
 use App\Services\PaymentService;
 use App\Services\StockLedgerService;
+use App\Services\StockLocationProvisioner;
 use Illuminate\Validation\ValidationException;
 
 require __DIR__.'/boot.php';
@@ -114,6 +115,13 @@ try {
             app(StockLedgerService::class)->commitForOrder($order, $user);
 
             return ['order_id' => $order->id];
+        })(),
+        'provision_location' => (function () use ($payload) {
+            $store = Store::query()->findOrFail($payload['store_id']);
+
+            $location = app(StockLocationProvisioner::class)->ensureDefaultForStore($store);
+
+            return ['location_id' => $location->id];
         })(),
         default => throw new RuntimeException('unknown-scenario:'.$scenario),
     };

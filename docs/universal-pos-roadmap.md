@@ -133,8 +133,9 @@ payment/void.
 
 ### Phase 3B — Inventory & Stock Management
 
-**Checkpoint 1 (Inventory Foundation) & Checkpoint 2 (Stock Ledger Service &
-Order Integration) selesai.** Detail desain: `docs/inventory-design.md`.
+**Checkpoint 1 (Inventory Foundation), Checkpoint 2 (Stock Ledger Service &
+Order Integration) & Checkpoint 3 (Inventory API, Provisioning & Data Integrity)
+selesai.** Detail desain: `docs/inventory-design.md`; API: `docs/inventory-api.md`.
 
 - [x] Migrasi `items.tracks_stock` (default false) + index.
 - [x] Migrasi `stock_locations` (jaminan portabel satu default per store via
@@ -158,10 +159,22 @@ Order Integration) selesai.** Detail desain: `docs/inventory-design.md`.
       idempotency, decimal 1.125, void payment tidak mengubah stok).
 - [x] Concurrency MySQL skenario 6 (berebut unit terakhir) & 7 (komit ganda)
       pada DB khusus `saas_pos_concurrency_test` — PASS.
-- [ ] **Checkpoint berikutnya:** endpoint/Policy/Resource inventory.
-- [ ] Ditunda: adjustment, transfer, receipt, retur, multi-satuan, BOM/resep,
-      konsumsi bahan baku, refund/retur otomatis.
+- [x] Provisioning lokasi default terhubung ke registrasi store (inventory
+      store saja); command hanya memproses store inventory-capable; race
+      dihilangkan via lock baris store + harness skenario 8 — PASS.
+- [x] API lokasi stok (CRUD) dengan policy owner/admin kelola, cashier baca.
+- [x] API saldo stok **read-only** (`/stock/balances`, `/items/{item}/stock`).
+- [x] API ledger movement **read-only** (`/stock/movements`).
+- [x] Gating `EnsureInventoryEnabled` (403 `inventory_not_available`).
+- [x] Proteksi delete item (`item_has_stock_history`) & lokasi
+      (`default_stock_location_protected`, `stock_location_in_use`).
+- [x] Test fitur API + isolasi tenant + provisioning + proteksi delete.
+- [ ] **Checkpoint berikutnya:** stock receipt / opening stock / adjustment
+      (mutasi ledger via API) + konfigurasi `tracks_stock` per item.
+- [ ] Ditunda: transfer, retur, multi-satuan, BOM/resep, konsumsi bahan baku,
+      refund/retur otomatis.
 - [ ] Migrasi inventory belum diterapkan ke DB development (menunggu persetujuan).
+- [ ] Catatan: retail end-to-end belum siap sampai mekanisme stock-in tersedia.
 
 ### Phase 3C — Laporan Penjualan
 

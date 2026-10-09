@@ -4,7 +4,7 @@
 > Setiap bagian ditandai **Sudah diimplementasikan** atau **Rencana** agar
 > tidak ada asumsi yang disalahartikan sebagai kode yang sudah ada.
 
-Versi terakhir audit: 2026-10-10 (Phase 3B Checkpoint 1 — fondasi inventory).
+Versi terakhir audit: 2026-10-10 (Phase 3B Checkpoint 3 — Inventory API).
 
 ---
 
@@ -697,10 +697,12 @@ Detail per fase ada di `docs/universal-pos-roadmap.md`.
 4. **Phase 3A (selesai):** Cash sessions / shift kasir + integrasi payment tunai.
 5. **Phase 3B (berjalan):** Inventory & Stock Management.
    **Checkpoint 1 (selesai):** fondasi DB/model/enum/relasi + provisioning lokasi
-   default + test dasar. **Checkpoint 2 (selesai):** `StockLedgerService`,
-   reservasi/komit/pelepasan terintegrasi `OrderService`, idempotency, tenant &
-   business-type validation (`docs/inventory-design.md`). Endpoint, adjustment,
-   transfer, receipt menyusul.
+   default. **Checkpoint 2 (selesai):** `StockLedgerService`, reservasi/komit/
+   pelepasan terintegrasi `OrderService`, idempotency, tenant & business-type
+   validation. **Checkpoint 3 (selesai):** API lokasi stok (CRUD), API saldo &
+   ledger **read-only**, provisioning terhubung ke registrasi store, proteksi
+   delete item/lokasi (`docs/inventory-design.md`, `docs/inventory-api.md`).
+   Stock receipt/opening stock/adjustment, transfer, receipt menyusul.
    **Sales reports dipindah ke Phase 3C** (lihat `docs/universal-pos-roadmap.md`).
 6. **Phase 4+:** Modul industri (F&B, laundry, servis, salon) dan
    varian/modifier/paket sesuai prioritas bisnis.
