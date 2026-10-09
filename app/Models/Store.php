@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\BusinessType;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -28,6 +29,7 @@ class Store extends Model
         'postal_code',
         'logo',
         'is_active',
+        'business_type',
     ];
 
     /**
@@ -37,6 +39,7 @@ class Store extends Model
     {
         return [
             'is_active' => 'boolean',
+            'business_type' => BusinessType::class,
         ];
     }
 

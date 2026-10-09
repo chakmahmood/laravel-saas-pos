@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Enums\BusinessType;
 use App\Enums\StoreRole;
 use App\Http\Controllers\Controller;
 use App\Models\Plan;
@@ -13,14 +14,14 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
     public function __construct(
         private readonly CurrentStoreService $currentStores,
-    ) {
-    }
+    ) {}
 
     /**
      * Register user + first store + owner membership + free subscription.
@@ -62,6 +63,15 @@ class AuthController extends Controller
                 'alpha_dash',
                 'unique:stores,slug',
             ],
+
+            /*
+             * Optional. Existing clients that do not send it keep the
+             * `other` default, so this validation is backward compatible.
+             */
+            'business_type' => [
+                'nullable',
+                Rule::enum(BusinessType::class),
+            ],
         ]);
 
         $result = DB::transaction(function () use ($validated) {
@@ -81,6 +91,8 @@ class AuthController extends Controller
                 'owner_id' => $user->id,
                 'name' => $validated['store_name'],
                 'slug' => $validated['store_slug'],
+                'business_type' => $validated['business_type']
+                    ?? BusinessType::OTHER->value,
             ]);
 
             /*
@@ -150,6 +162,7 @@ class AuthController extends Controller
                     'id' => $result['store']->id,
                     'name' => $result['store']->name,
                     'slug' => $result['store']->slug,
+                    'business_type' => $result['store']->business_type->value,
                 ],
 
                 'subscription' => [
@@ -196,8 +209,8 @@ class AuthController extends Controller
             ->first();
 
         if (
-            !$user ||
-            !Hash::check($validated['password'], $user->password)
+            ! $user ||
+            ! Hash::check($validated['password'], $user->password)
         ) {
             throw ValidationException::withMessages([
                 'email' => [
@@ -259,7 +272,7 @@ class AuthController extends Controller
     {
         $request->user()
             ->currentAccessToken()
-                ?->delete();
+            ?->delete();
 
         return response()->json([
             'message' => 'Logout berhasil.',

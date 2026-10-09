@@ -2,6 +2,7 @@
 
 namespace Database\Factories;
 
+use App\Enums\BusinessType;
 use App\Models\Store;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
@@ -24,7 +25,15 @@ class StoreFactory extends Factory
             'name' => fake()->company(),
             'slug' => 'store-'.Str::lower(Str::random(12)),
             'is_active' => true,
+            'business_type' => BusinessType::RETAIL->value,
         ];
+    }
+
+    public function ofType(BusinessType $type): static
+    {
+        return $this->state(fn (): array => [
+            'business_type' => $type->value,
+        ]);
     }
 
     public function inactive(): static

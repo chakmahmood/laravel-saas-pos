@@ -127,6 +127,7 @@ class CurrentStoreController extends Controller
             'name' => $store->name,
             'slug' => $store->slug,
             'role' => $store->pivot->role,
+            'business_type' => $store->business_type->value,
             'is_active' => $store->is_active,
         ];
     }
