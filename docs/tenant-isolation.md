@@ -118,6 +118,12 @@ unauthorized (401). Client harus memilih store lewat `PUT /api/current-store`.
 Store yang tidak ada dan store milik tenant lain sengaja menghasilkan respons
 **403 yang sama** agar keberadaan tenant lain tidak bocor (enumeration).
 
+Di luar endpoint konteks toko, error otorisasi (policy/Gate) dikembalikan
+sebagai **403** `{message, code:"forbidden"}` dan resource yang tidak ditemukan
+(termasuk milik tenant lain) sebagai **404** `{message, code:"not_found"}`.
+Body error tidak pernah memuat nama kelas internal, id, atau stack trace
+(dijamin oleh handler di `bootstrap/app.php`).
+
 ## 6. Melindungi endpoint bisnis baru
 
 Daftarkan endpoint bisnis di dalam group `auth:sanctum` **dan**
@@ -202,13 +208,18 @@ Helper test ada di `tests/Concerns/InteractsWithTenants.php`.
 
 ## 9. Batasan implementasi saat ini
 
-- Belum ada model bisnis (Category/Product/Sales), jadi tenant isolation
-  diuji melalui route hipotetis `_test/business` di dalam test. Test
-  end-to-end untuk record bisnis ditambahkan saat model pertama dibuat.
-- Belum ada granular permission per role. `role` pada membership baru dipakai
-  sebagai informasi; otorisasi aksi per role akan ditambahkan terpisah
-  (kemungkinan dengan Spatie Permission atau policy).
+- Model bisnis sudah tersedia (Category, Item, Customer, Order, Payment,
+  CashSession, Stock*) dan dilindungi policy per resource (`App\Policies\*`).
+  `TenantIsolationTest` tetap memakai route hipotetis `_test/business` untuk
+  menguji mekanisme tenant secara terisolasi.
+- Role granular per aksi sudah ditegakkan via policy (owner/admin/cashier),
+  bukan lagi hanya informasi.
+- Endpoint auth publik (`login`, `register`) memiliki rate limiting
+  (`throttle:auth`).
 - Belum ada strategi pemilihan **last-active store**; login memilih store
   aktif pertama berdasarkan ID.
 - Belum ada device/session management.
+- **Hard-delete store dengan histori inventory/finansial belum aman pada
+  MySQL** (FK RESTRICT). Belum ada endpoint delete store; lihat
+  `docs/backend-readiness-audit.md` §6.
 - Billing/payment, Redis, queue, dan sharding belum termasuk.

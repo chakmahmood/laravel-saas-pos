@@ -181,9 +181,14 @@ Detail desain: `docs/inventory-design.md`; API: `docs/inventory-api.md`.
       tenant, permission, adjustment di bawah reserved, no-op delta 0).
 - [x] Concurrency MySQL skenario 9–12 (opening race, receipt bersamaan,
       adjustment bersamaan, retry idempotent bersamaan) — PASS.
+- [x] **Checkpoint 5 (Backend Readiness Audit & Hardening):** audit keamanan,
+      tenant isolation, order/payment/cash, inventory, DB, API contract, lock
+      ordering; rate limiting auth; kontrak error 403/404 aman. Laporan:
+      `docs/backend-readiness-audit.md`. 306 tests / 1274 assertions PASS.
 - [ ] **Checkpoint berikutnya:** transfer antarlokasi, retur, laporan stok.
 - [ ] Ditunda: purchase order, supplier, multi-satuan, BOM/resep, konsumsi bahan
       baku, refund/retur otomatis.
+- [ ] Keputusan store lifecycle (hard-delete store dengan histori) — lihat audit §6.
 - [ ] Migrasi inventory belum diterapkan ke DB development (menunggu persetujuan).
 - [ ] Catatan: retail kini dapat mencatat stok via opening/receipt.
 

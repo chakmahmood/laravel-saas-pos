@@ -20,7 +20,10 @@ use App\Policies\PaymentPolicy;
 use App\Policies\StockBalancePolicy;
 use App\Policies\StockLocationPolicy;
 use App\Policies\StockMovementPolicy;
+use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -47,5 +50,20 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(StockLocation::class, StockLocationPolicy::class);
         Gate::policy(StockBalance::class, StockBalancePolicy::class);
         Gate::policy(StockMovement::class, StockMovementPolicy::class);
+
+        /*
+         * Rate limiting for the public authentication endpoints (login and
+         * register) to slow down credential brute-forcing. Two independent
+         * buckets are enforced: a per-IP ceiling and a stricter per
+         * email+IP ceiling.
+         */
+        RateLimiter::for('auth', function (Request $request): array {
+            $email = (string) $request->input('email', '');
+
+            return [
+                Limit::perMinute(30)->by('ip:'.$request->ip()),
+                Limit::perMinute(5)->by('email:'.$email.'|'.$request->ip()),
+            ];
+        });
     }
 }
