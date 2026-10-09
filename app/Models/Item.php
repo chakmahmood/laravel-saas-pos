@@ -6,6 +6,7 @@ use App\Enums\ItemType;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * Universal POS catalog item.
@@ -36,6 +37,7 @@ class Item extends Model
         'selling_price',
         'unit',
         'is_active',
+        'tracks_stock',
     ];
 
     /**
@@ -48,6 +50,7 @@ class Item extends Model
             'cost_price' => 'integer',
             'selling_price' => 'integer',
             'is_active' => 'boolean',
+            'tracks_stock' => 'boolean',
         ];
     }
 
@@ -65,5 +68,21 @@ class Item extends Model
     public function category(): BelongsTo
     {
         return $this->belongsTo(Category::class);
+    }
+
+    /**
+     * Per-location stock projections for this item.
+     */
+    public function stockBalances(): HasMany
+    {
+        return $this->hasMany(StockBalance::class);
+    }
+
+    /**
+     * Inventory ledger rows for this item.
+     */
+    public function stockMovements(): HasMany
+    {
+        return $this->hasMany(StockMovement::class);
     }
 }

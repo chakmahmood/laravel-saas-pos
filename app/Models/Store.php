@@ -123,6 +123,30 @@ class Store extends Model
         return $this->hasMany(CashSession::class);
     }
 
+    /**
+     * Physical stock locations of this store.
+     */
+    public function stockLocations(): HasMany
+    {
+        return $this->hasMany(StockLocation::class);
+    }
+
+    /**
+     * Stock balance projections of this store.
+     */
+    public function stockBalances(): HasMany
+    {
+        return $this->hasMany(StockBalance::class);
+    }
+
+    /**
+     * Inventory ledger movements of this store.
+     */
+    public function stockMovements(): HasMany
+    {
+        return $this->hasMany(StockMovement::class);
+    }
+
     public function activeSubscription(): HasOne
     {
         return $this->hasOne(Subscription::class)

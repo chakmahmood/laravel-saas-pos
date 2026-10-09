@@ -89,6 +89,14 @@ class Order extends Model
     }
 
     /**
+     * Inventory ledger movements linked to this order, if any.
+     */
+    public function stockMovements(): HasMany
+    {
+        return $this->hasMany(StockMovement::class);
+    }
+
+    /**
      * Sum of payments that still count toward the order (not voided).
      */
     public function activePaidAmount(): int

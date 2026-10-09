@@ -113,17 +113,53 @@ payment/void.
 
 ---
 
-## Phase 3 — Cash Sessions & Reports
+## Phase 3 — Cash Sessions, Inventory & Reports
 
-**Phase 3A (Cash Sessions) selesai. Reports belum dikerjakan.**
+> **Catatan perubahan (2026-10-10):** sebelumnya roadmap menyebut *Phase 3B =
+> Laporan penjualan* dan inventory berada di *Phase 4*. Keputusan terbaru
+> menetapkan **Phase 3B = Inventory & Stock Management**; laporan penjualan
+> **dipindah ke Phase 3C** dan rencananya tetap dipertahankan, tidak dihapus.
+
+### Phase 3A — Cash Sessions
+
+**Selesai. Reports belum dikerjakan.**
 
 - [x] Migrasi `cash_sessions` + `cash_movements`; buka/tutup sesi; rekap kas.
 - [x] Hubungkan `payments.cash_session_id` (tunai → shift kasir).
 - [x] Jaminan satu shift terbuka per kasir/toko (unique `open_guard`, race-safe).
 - [x] Concurrency MySQL: open-shift race (5 skenario harness PASS).
 - [x] Test rekonsiliasi & isolasi (`tests/Feature/CashSessionTest.php`).
-- [ ] **Phase 3B — Laporan penjualan** (harian/periode, per metode, per kasir).
 - [ ] Migrasi baru belum diterapkan ke DB development (menunggu review).
+
+### Phase 3B — Inventory & Stock Management
+
+**Checkpoint 1 (Inventory Foundation) selesai.** Detail desain:
+`docs/inventory-design.md`.
+
+- [x] Migrasi `items.tracks_stock` (default false) + index.
+- [x] Migrasi `stock_locations` (jaminan portabel satu default per store via
+      `default_guard` nullable unique).
+- [x] Migrasi `stock_balances` (`quantity_on_hand`, `quantity_reserved`,
+      unique per lokasi+item).
+- [x] Migrasi `stock_movements` (ledger append-only, idempotency unik per store).
+- [x] Enum `StockLocationType` & `StockMovementType` (+ helper arah movement).
+- [x] Model `StockLocation`/`StockBalance`/`StockMovement` + relasi Item/Store/
+      Order/OrderItem + factory.
+- [x] Provisioning lokasi default idempotent + `php artisan stock:provision-locations`.
+- [x] Test fondasi (item flag, lokasi, saldo, movement, enum, provisioning).
+- [ ] **Checkpoint 2:** `StockLedgerService`, integrasi OrderService (reservasi,
+      komit, lepas), kolom `orders.stock_location_id`/`stock_committed_at`.
+- [ ] **Checkpoint berikutnya:** endpoint/Policy/Resource inventory.
+- [ ] Ditunda: adjustment, transfer, receipt, retur, multi-satuan, BOM/resep,
+      konsumsi bahan baku, refund/retur otomatis.
+- [ ] Migrasi inventory belum diterapkan ke DB development (menunggu persetujuan).
+
+### Phase 3C — Laporan Penjualan
+
+*(Dipindah dari Phase 3B sebelumnya.)*
+
+- [ ] Laporan harian/periode, per metode pembayaran, per kasir.
+- [ ] (Laporan stok menyusul setelah integrasi inventory.)
 
 ---
 
@@ -132,7 +168,10 @@ payment/void.
 Dibangun **di atas** `items`/`orders`/`customers`. Pilih sesuai kebutuhan.
 
 ### Retail / F&B — Inventory
-- [ ] `stock_movements`, `suppliers`, `purchases`, `stock_opnames`, `returns`.
+- [x] Fondasi ledger/saldo/lokasi (`stock_locations`, `stock_balances`,
+      `stock_movements`) — Phase 3B Checkpoint 1.
+- [ ] Integrasi order (reservasi/komit) — Phase 3B Checkpoint 2.
+- [ ] `suppliers`, `purchases`, `purchase_items`, `stock_opnames`, `returns`.
 - [ ] Stok masuk/keluar terhubung `orders` & pembelian.
 
 ### F&B

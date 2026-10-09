@@ -4,7 +4,7 @@
 > Setiap bagian ditandai **Sudah diimplementasikan** atau **Rencana** agar
 > tidak ada asumsi yang disalahartikan sebagai kode yang sudah ada.
 
-Versi terakhir audit: 2026-10-09.
+Versi terakhir audit: 2026-10-10 (Phase 3B Checkpoint 1 — fondasi inventory).
 
 ---
 
@@ -101,7 +101,12 @@ erDiagram
     stores ||--o{ customer_assets : "RENCANA (servis)"
     items ||--o{ package_items : "RENCANA (paket)"
     items ||--o{ modifier_groups : "RENCANA (F&B)"
-    stores ||--o{ stock_movements : "RENCANA (retail)"
+    stores ||--o{ stock_locations : "SUDAH (fondasi 3B)"
+    stock_locations ||--o{ stock_balances : "SUDAH (fondasi 3B)"
+    items ||--o{ stock_balances : "SUDAH (fondasi 3B)"
+    stores ||--o{ stock_movements : "SUDAH (fondasi 3B)"
+    stock_locations ||--o{ stock_movements : "SUDAH (fondasi 3B)"
+    items ||--o{ stock_movements : "SUDAH (fondasi 3B)"
 ```
 
 Catatan: `order_items` mereferensikan `items` **secara opsional** (`item_id`
@@ -175,7 +180,7 @@ snapshot.
 | `cost_price` | bigint nullable | minor units; `null` = tidak dilacak |
 | `selling_price` | bigint default 0 | minor units |
 | `unit` | string(20) default `pcs` | `pcs`, `kg`, `liter`, `jam`, dll |
-| `tracks_stock` | boolean default false | true hanya untuk yang pakai stok |
+| `tracks_stock` | boolean default false | **Sudah (Phase 3B foundation)**; true hanya untuk yang pakai stok |
 | `is_active` | boolean default true | untuk menyembunyikan dari POS |
 | `created_at`/`updated_at` | timestamps | |
 
@@ -185,6 +190,31 @@ Index/unique yang direkomendasikan:
 - `index(store_id, is_active)`
 - `index(store_id, type)`
 - `index(store_id, category_id)`
+- `index(store_id, tracks_stock)` **Sudah (Phase 3B foundation)**
+
+> Catatan: `tracks_stock` sempat direncanakan di §4.2 tetapi baru benar-benar
+> dibuat pada Phase 3B Checkpoint 1. Item lama tetap `false`.
+
+#### Foundation inventory (Sudah — Phase 3B Checkpoint 1)
+
+Hanya fondasi database/model; belum ada endpoint, service ledger, reservasi,
+komit, adjustment, atau transfer. Lihat `docs/inventory-design.md`.
+
+- `stock_locations` — `id`, `store_id` (cascade), `name` (unique per store),
+  `code` nullable (unique per store), `type` (enum `StockLocationType`:
+  `warehouse`/`outlet`/`other`), `is_default`, `is_active`, `default_guard`
+  (string nullable **unique**, jaminan portabel satu default per store),
+  timestamps.
+- `stock_balances` — `id`, `store_id`, `stock_location_id`, `item_id`,
+  `quantity_on_hand` decimal(12,3) default 0, `quantity_reserved` decimal(12,3)
+  default 0, timestamps; unique `(stock_location_id, item_id)`.
+  `available = on_hand - reserved`. Tanpa DB CHECK (alasan portabilitas di
+  `docs/inventory-design.md` §9).
+- `stock_movements` — ledger append-only: `store_id`, `stock_location_id`,
+  `item_id`, `type` (enum `StockMovementType`), `quantity` decimal(12,3)
+  (selalu positif), `unit_cost` nullable, `order_id`/`order_item_id` nullable,
+  `reversal_of_id` nullable (self), `idempotency_key` nullable
+  (unique per store), `note`, `created_by`, `occurred_at`, timestamps.
 
 #### `customers` (Sudah — Phase 2, soft delete)
 - `id`, `store_id`, `name`, `phone` nullable, `email` nullable, `address`
@@ -288,7 +318,7 @@ Unique `(store_id, number)`; index `(store_id, placed_at)`,
 
 | Industri | Tabel | Menempel pada |
 |----------|-------|---------------|
-| Retail | `stock_movements`, `suppliers`, `purchases`, `purchase_items`, `stock_opnames`, `returns` | `items` |
+| Retail | `suppliers`, `purchases`, `purchase_items`, `stock_opnames`, `returns` (fondasi `stock_locations`/`stock_balances`/`stock_movements` sudah ada — Phase 3B Checkpoint 1) | `items` |
 | F&B | `modifier_groups`, `modifier_options`, `item_modifier_group`, `dining_tables`, `kitchen_tickets`, (`recipes`/`ingredients`) | `items`, `orders` |
 | Laundry | `laundry_jobs` (berat, satuan, status pengerjaan, estimasi, pengambilan) | `orders`/`order_items` |
 | Servis/Reparasi | `customer_assets`, `repair_jobs`, `repair_job_parts` | `orders`, `customers` |
@@ -665,9 +695,13 @@ Detail per fase ada di `docs/universal-pos-roadmap.md`.
 2. **Phase 1 (selesai):** Categories API + Catalog Items API (+ kuota item + policy).
 3. **Phase 2 (selesai):** Customers API + Order & Order Items + Payments (tanpa gateway).
 4. **Phase 3A (selesai):** Cash sessions / shift kasir + integrasi payment tunai.
-   **Phase 3B:** Sales reports (belum).
-5. **Phase 4+:** Modul industri (retail inventory, F&B, laundry, servis, salon)
-   dan varian/modifier/paket sesuai prioritas bisnis.
+5. **Phase 3B (berjalan):** Inventory & Stock Management.
+   **Checkpoint 1 (selesai):** fondasi DB/model/enum/relasi + provisioning lokasi
+   default + test dasar (`docs/inventory-design.md`). Integrasi order, reservasi,
+   komit stok, endpoint, adjustment, transfer, receipt menyusul.
+   **Sales reports dipindah ke Phase 3C** (lihat `docs/universal-pos-roadmap.md`).
+6. **Phase 4+:** Modul industri (F&B, laundry, servis, salon) dan
+   varian/modifier/paket sesuai prioritas bisnis.
 
 ---
 
