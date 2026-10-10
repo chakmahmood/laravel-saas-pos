@@ -134,6 +134,44 @@ class PaymentIdempotencyTest extends TestCase
         $this->assertSame(1, Payment::query()->where('store_id', $storeB->id)->count());
     }
 
+    public function test_replaying_a_voided_payment_returns_the_voided_record(): void
+    {
+        [$owner, $store] = $this->createOwnerWithStore();
+        $token = $this->issueToken($owner, $store);
+        $this->openShiftFor($owner, $store);
+        $orderId = $this->makeOrderId($store, $token, 10000);
+
+        $payload = [
+            'idempotency_key' => 'pay-void-replay',
+            'payment_method' => 'cash',
+            'amount' => 10000,
+        ];
+
+        $paymentId = $this->withHeaders($this->bearer($token))
+            ->postJson('/api/orders/'.$orderId.'/payments', $payload)
+            ->assertCreated()
+            ->json('data.id');
+
+        $this->withHeaders($this->bearer($token))
+            ->postJson('/api/payments/'.$paymentId.'/void', ['reason' => 'Salah input'])
+            ->assertOk();
+
+        // Replaying the same key returns the existing (now voided) record; it
+        // does not create a second payment and does not silently re-pay.
+        $replay = $this->withHeaders($this->bearer($token))
+            ->postJson('/api/orders/'.$orderId.'/payments', $payload)
+            ->assertCreated()
+            ->assertJsonPath('data.status', 'voided');
+
+        $this->assertSame($paymentId, $replay->json('data.id'));
+        $this->assertSame(1, Payment::query()->where('order_id', $orderId)->count());
+        $this->assertDatabaseHas('orders', [
+            'id' => $orderId,
+            'paid_amount' => 0,
+            'payment_status' => PaymentStatus::UNPAID->value,
+        ]);
+    }
+
     public function test_replaying_a_cash_payment_after_the_shift_closed_returns_the_original(): void
     {
         [$owner, $store] = $this->createOwnerWithStore();
