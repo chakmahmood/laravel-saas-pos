@@ -44,6 +44,37 @@ class PaymentService
                 ->lockForUpdate()
                 ->firstOrFail();
 
+            /*
+             * Idempotency: a replay with the same key and the same payload
+             * returns the original payment and never records a second one. The
+             * lookup runs after the order row lock, so concurrent retries for
+             * the same order are serialized. This is checked before the
+             * cash-session requirement so a genuine retry of an already
+             * recorded cash payment does not fail after the shift has closed.
+             */
+            $idempotencyKey = $this->idempotencyKey($data);
+            $fingerprint = $idempotencyKey !== null
+                ? $this->paymentFingerprint($data)
+                : null;
+
+            if ($idempotencyKey !== null) {
+                $existing = Payment::query()
+                    ->where('store_id', $locked->store_id)
+                    ->where('idempotency_key', $idempotencyKey)
+                    ->first();
+
+                if ($existing !== null) {
+                    if ($existing->request_fingerprint !== $fingerprint) {
+                        throw new OrderConflictException(
+                            'Idempotency key ini sudah dipakai untuk permintaan pembayaran yang berbeda.',
+                            'idempotency_conflict',
+                        );
+                    }
+
+                    return $existing;
+                }
+            }
+
             if ($locked->fulfillment_status === FulfillmentStatus::CANCELLED) {
                 throw new OrderConflictException(
                     'Order yang dibatalkan tidak dapat menerima pembayaran.',
@@ -92,6 +123,8 @@ class PaymentService
                 'amount' => $amount,
                 'status' => PaymentRecordStatus::COMPLETED,
                 'reference_number' => $data['reference_number'] ?? null,
+                'idempotency_key' => $idempotencyKey,
+                'request_fingerprint' => $fingerprint,
                 'notes' => $data['notes'] ?? null,
                 'paid_at' => $data['paid_at'] ?? now(),
                 'recorded_by' => $recorder->getKey(),
@@ -201,5 +234,32 @@ class PaymentService
         }
 
         return PaymentStatus::UNPAID;
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    private function idempotencyKey(array $data): ?string
+    {
+        $key = $data['idempotency_key'] ?? null;
+
+        return is_string($key) && $key !== '' ? $key : null;
+    }
+
+    /**
+     * Deterministic fingerprint of the payment payload, used to tell a safe
+     * retry of the same request apart from a conflicting reuse of the key.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function paymentFingerprint(array $data): string
+    {
+        return hash('sha256', (string) json_encode([
+            'payment_method' => $data['payment_method'] ?? null,
+            'amount' => (int) ($data['amount'] ?? 0),
+            'reference_number' => $data['reference_number'] ?? null,
+            'notes' => $data['notes'] ?? null,
+            'paid_at' => $data['paid_at'] ?? null,
+        ]));
     }
 }

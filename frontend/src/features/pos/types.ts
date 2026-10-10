@@ -85,12 +85,16 @@ export interface OrderCreateItemPayload {
 /**
  * `POST /api/orders`. The tenant (store) is resolved from the bearer token by
  * the `current.store` middleware and is never sent by the client.
+ *
+ * `idempotency_key` makes the request safe to retry: replaying the same key and
+ * payload returns the original order instead of creating a duplicate.
  */
 export interface OrderCreatePayload {
   customer_id?: number | null
   items: OrderCreateItemPayload[]
   tax_amount?: number
   notes?: string | null
+  idempotency_key?: string
 }
 
 /** `POST /api/orders/{order}/payments`. */
@@ -100,6 +104,7 @@ export interface PaymentCreatePayload {
   reference_number?: string | null
   notes?: string | null
   paid_at?: string | null
+  idempotency_key?: string
 }
 
 export const PAYMENT_METHODS: ReadonlyArray<{ value: PaymentMethod; label: string }> = [

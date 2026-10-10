@@ -25,6 +25,8 @@ class Payment extends Model
         'amount',
         'status',
         'reference_number',
+        'idempotency_key',
+        'request_fingerprint',
         'notes',
         'paid_at',
         'recorded_by',

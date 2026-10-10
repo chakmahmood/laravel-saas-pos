@@ -29,6 +29,14 @@ class StoreOrderRequest extends FormRequest
                     ->whereNull('deleted_at'),
             ],
 
+            /*
+             * Optional client-generated key that makes order creation safe to
+             * retry. Replaying the same key with the same payload returns the
+             * original order instead of creating a duplicate; reusing the key
+             * with a different payload is rejected as a conflict (409).
+             */
+            'idempotency_key' => ['nullable', 'string', 'max:100'],
+
             'items' => ['required', 'array', 'min:1'],
             'items.*.item_id' => ['required', 'integer'],
             'items.*.quantity' => ['required', 'numeric', 'gt:0', 'max:999999'],

@@ -62,6 +62,19 @@ item) dan baris `orders`/`cash_sessions` (pembayaran/void/shift) benar-benar
 men-serialisasi akses pada MySQL InnoDB. Pembukaan shift juga dijaga unique index
 `cash_sessions.open_guard`.
 
+### 3.1 Idempotensi order & pembayaran (Phase 3A)
+
+Skenario 13 dan 14 (`run.php`) ditambahkan bersama hardening idempotensi order
+dan pembayaran:
+
+| Skenario | Beban | Invariant |
+|----------|-------|-----------|
+| Idempotent order | 4 worker, `idempotency_key` sama | Tepat 1 order; semua worker menerima order id yang sama |
+| Idempotent payment | 4 worker bayar order sama, key sama | Tepat 1 pembayaran; order lunas tepat sekali |
+
+> Status: **belum dieksekusi pada checkpoint ini**. Jalankan
+> `php tests/Concurrency/run.php` pada MySQL 8 untuk memverifikasinya.
+
 ---
 
 ## 4. Batasan

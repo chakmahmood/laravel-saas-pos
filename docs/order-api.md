@@ -101,6 +101,27 @@ Aturan server:
 
 Respons `201`: `OrderResource` dengan `items` dan `customer`.
 
+### 3.1 Idempotency (opsional, direkomendasikan untuk POS)
+
+`POST /api/orders` dan `POST /api/orders/{order}/payments` menerima field
+opsional `idempotency_key` (string, maks 100) dari client.
+
+- Key disimpan per toko dengan unique index `(store_id, idempotency_key)`,
+  dikombinasikan dengan `request_fingerprint` (sha256 payload kanonik).
+- Mengirim ulang key **dan** payload yang sama mengembalikan **hasil yang sama**
+  (order / pembayaran yang sudah ada), bukan duplikat. Aman untuk retry setelah
+  timeout atau koneksi putus.
+- Menggunakan key yang sama dengan payload **berbeda** ditolak `409`
+  `idempotency_conflict`.
+- Key berbeda untuk payload berbeda menghasilkan dokumen baru (perilaku biasa).
+- Tanpa key, perilaku lama tetap berlaku (tidak ada jaminan idempotensi).
+
+Client POS membuat satu key per upaya checkout dan memakainya ulang untuk retry
+order **dan** pembayaran. **Timeout bukan berarti gagal:** retry dengan key yang
+sama menyelesaikan ke hasil yang sama. Ringkasan alur di frontend: retry
+memakai order yang sudah dibuat (bila ada), dan kasir dapat memilih "mulai
+transaksi baru" untuk membuang key.
+
 ---
 
 ## 4. Nomor Order & Concurrency

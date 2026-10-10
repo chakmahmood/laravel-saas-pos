@@ -47,17 +47,45 @@ class OrderService
     /**
      * Create an order with its items atomically.
      *
+     * Idempotency: when the client supplies an `idempotency_key`, a replay with
+     * the same key and the same payload returns the original order instead of
+     * creating a second one. The lookup happens after the store row lock, so
+     * concurrent retries are serialized and race-safe. Reusing a key with a
+     * different payload is a 409 (`idempotency_conflict`).
+     *
      * @param  array<string, mixed>  $data
      *
      * @throws ValidationException
+     * @throws OrderConflictException
      */
     public function create(Store $store, User $cashier, array $data): Order
     {
-        return DB::transaction(function () use ($store, $cashier, $data) {
+        $idempotencyKey = $this->idempotencyKey($data);
+        $fingerprint = $idempotencyKey !== null
+            ? $this->orderFingerprint($data)
+            : null;
+
+        return DB::transaction(function () use ($store, $cashier, $data, $idempotencyKey, $fingerprint) {
             $lockedStore = Store::query()
                 ->whereKey($store->getKey())
                 ->lockForUpdate()
                 ->firstOrFail();
+
+            if ($idempotencyKey !== null) {
+                $existing = Order::query()
+                    ->where('store_id', $lockedStore->getKey())
+                    ->where('idempotency_key', $idempotencyKey)
+                    ->first();
+
+                if ($existing !== null) {
+                    $this->assertSameRequest(
+                        $existing->request_fingerprint,
+                        $fingerprint,
+                    );
+
+                    return $existing;
+                }
+            }
 
             $customer = $this->resolveCustomer(
                 $lockedStore,
@@ -86,6 +114,8 @@ class OrderService
 
             $order = $lockedStore->orders()->create([
                 'order_number' => $this->numbers->next($lockedStore),
+                'idempotency_key' => $idempotencyKey,
+                'request_fingerprint' => $fingerprint,
                 'customer_id' => $customer?->id,
                 'cashier_id' => $cashier->id,
                 'subtotal' => $subtotal,
@@ -329,5 +359,60 @@ class OrderService
                 $field => 'Nilai uang melebihi batas maksimum yang diizinkan.',
             ]);
         }
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    private function idempotencyKey(array $data): ?string
+    {
+        $key = $data['idempotency_key'] ?? null;
+
+        return is_string($key) && $key !== '' ? $key : null;
+    }
+
+    /**
+     * @throws OrderConflictException when the same key was used for a different payload
+     */
+    private function assertSameRequest(?string $stored, ?string $incoming): void
+    {
+        if ($stored !== $incoming) {
+            throw new OrderConflictException(
+                'Idempotency key ini sudah dipakai untuk permintaan order yang berbeda.',
+                'idempotency_conflict',
+            );
+        }
+    }
+
+    /**
+     * Deterministic fingerprint of the client payload. Items are canonicalized
+     * (quantity normalized to 3 decimals, order-independent) so a retry that
+     * only reorders lines still matches the original request.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function orderFingerprint(array $data): string
+    {
+        $items = collect($data['items'])
+            ->map(fn (array $line): array => [
+                'item_id' => (int) $line['item_id'],
+                'quantity' => $this->canonicalQuantity($line['quantity']),
+                'discount_amount' => (int) ($line['discount_amount'] ?? 0),
+            ])
+            ->sortBy(fn (array $line): string => $line['item_id'].'|'.$line['quantity'].'|'.$line['discount_amount'])
+            ->values()
+            ->all();
+
+        return hash('sha256', (string) json_encode([
+            'customer_id' => isset($data['customer_id']) ? (int) $data['customer_id'] : null,
+            'items' => $items,
+            'tax_amount' => (int) ($data['tax_amount'] ?? 0),
+            'notes' => $data['notes'] ?? null,
+        ]));
+    }
+
+    private function canonicalQuantity(mixed $quantity): string
+    {
+        return number_format((float) $quantity, 3, '.', '');
     }
 }

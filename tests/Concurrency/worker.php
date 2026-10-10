@@ -57,9 +57,18 @@ try {
             $store = Store::query()->findOrFail($payload['store_id']);
             $user = User::query()->findOrFail($payload['user_id']);
 
-            $order = app(OrderService::class)->create($store, $user, [
-                'items' => [['item_id' => $payload['item_id'], 'quantity' => 1]],
-            ]);
+            $data = [
+                'items' => [[
+                    'item_id' => $payload['item_id'],
+                    'quantity' => $payload['quantity'] ?? 1,
+                ]],
+            ];
+
+            if (! empty($payload['idempotency_key'])) {
+                $data['idempotency_key'] = $payload['idempotency_key'];
+            }
+
+            $order = app(OrderService::class)->create($store, $user, $data);
 
             return ['order_id' => $order->id, 'order_number' => $order->order_number];
         })(),
@@ -67,10 +76,16 @@ try {
             $order = Order::query()->findOrFail($payload['order_id']);
             $user = User::query()->findOrFail($payload['user_id']);
 
-            $payment = app(PaymentService::class)->record($order, $user, [
+            $data = [
                 'payment_method' => 'cash',
                 'amount' => (int) $payload['amount'],
-            ]);
+            ];
+
+            if (! empty($payload['idempotency_key'])) {
+                $data['idempotency_key'] = $payload['idempotency_key'];
+            }
+
+            $payment = app(PaymentService::class)->record($order, $user, $data);
 
             return ['payment_id' => $payment->id];
         })(),

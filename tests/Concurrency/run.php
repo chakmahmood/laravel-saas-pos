@@ -17,6 +17,8 @@
  *  10. Concurrent receipts (distinct keys): no lost update, correct total.
  *  11. Concurrent adjustments: delta computed against the locked balance.
  *  12. Concurrent receipts with the same idempotency key: exactly one effect.
+ *  13. Concurrent order creation with the same idempotency key: exactly one order.
+ *  14. Concurrent payments with the same idempotency key: exactly one payment.
  *
  * Usage:
  *   php tests/Concurrency/run.php
@@ -779,6 +781,105 @@ printf(
 
 if ($successes !== 2 || (string) $balance12?->quantity_on_hand !== '5.000' || $receipts12 !== 1) {
     $failures[] = "shared-key receipts: expected a single effect of 5.000, got successes={$successes} on_hand=".($balance12?->quantity_on_hand ?? 'null')." receipts={$receipts12}";
+}
+
+/* ----------------- scenario 13: concurrent orders (same idempotency key) */
+
+echo "\n== Scenario 13: concurrent order creation with the same idempotency key ==\n";
+[$store13, $owner13] = makeStore('idem-order', withShift: false);
+$item13 = Item::create([
+    'store_id' => $store13->id,
+    'name' => 'Item',
+    'type' => 'product',
+    'selling_price' => 10000,
+    'unit' => 'pcs',
+    'is_active' => true,
+]);
+
+$n = 4;
+$shared13 = [
+    'store_id' => $store13->id,
+    'user_id' => $owner13->id,
+    'item_id' => $item13->id,
+    'idempotency_key' => 'sc13-shared',
+];
+[, $results] = runConcurrent($n, 'make_order', array_fill(0, $n, $shared13), $database);
+
+$successes = 0;
+$orderIds = [];
+foreach ($results as $r) {
+    if (($r['ok'] ?? false) === true) {
+        $successes++;
+        $orderIds[] = $r['result']['order_id'];
+    }
+}
+$orders13 = Order::query()->where('store_id', $store13->id)->count();
+$distinctOrders13 = count(array_unique($orderIds));
+
+printf(
+    "  successes=%d distinct_order_ids=%d orders_in_db=%d\n",
+    $successes,
+    $distinctOrders13,
+    $orders13,
+);
+
+if ($successes !== $n || $distinctOrders13 !== 1 || $orders13 !== 1) {
+    $failures[] = "idempotent order: expected {$n} replays converging on 1 order, got successes={$successes} distinct={$distinctOrders13} db={$orders13}";
+}
+
+/* --------------- scenario 14: concurrent payments (same idempotency key) */
+
+echo "\n== Scenario 14: concurrent payment with the same idempotency key ==\n";
+[$store14, $owner14] = makeStore('idem-pay');
+$item14 = Item::create([
+    'store_id' => $store14->id,
+    'name' => 'Item',
+    'type' => 'product',
+    'selling_price' => 10000,
+    'unit' => 'pcs',
+    'is_active' => true,
+]);
+
+$order14 = app(OrderService::class)->create($store14, $owner14, [
+    'items' => [['item_id' => $item14->id, 'quantity' => 1]],
+]);
+
+$n = 4;
+$shared14 = [
+    'order_id' => $order14->id,
+    'user_id' => $owner14->id,
+    'amount' => 10000,
+    'idempotency_key' => 'sc14-shared',
+];
+[, $results] = runConcurrent($n, 'pay', array_fill(0, $n, $shared14), $database);
+
+$successes = 0;
+$paymentIds = [];
+foreach ($results as $r) {
+    if (($r['ok'] ?? false) === true) {
+        $successes++;
+        $paymentIds[] = $r['result']['payment_id'];
+    }
+}
+
+$order14->refresh();
+$payments14 = $order14->payments()->count();
+$distinctPayments14 = count(array_unique($paymentIds));
+
+printf(
+    "  successes=%d distinct_payment_ids=%d payments_in_db=%d paid=%d status=%s\n",
+    $successes,
+    $distinctPayments14,
+    $payments14,
+    $order14->paid_amount,
+    $order14->payment_status->value,
+);
+
+if ($successes !== $n || $distinctPayments14 !== 1 || $payments14 !== 1) {
+    $failures[] = "idempotent payment: expected {$n} replays converging on 1 payment, got successes={$successes} distinct={$distinctPayments14} db={$payments14}";
+}
+if ($order14->paid_amount !== 10000 || $order14->payment_status !== PaymentStatus::PAID) {
+    $failures[] = 'idempotent payment: order is not fully paid exactly once';
 }
 
 /* ------------------------------------------------------------- summary */

@@ -191,14 +191,17 @@ describe('PosPage', () => {
     await flushPromises()
 
     // The client never sends a store id or a client-computed price/total.
-    expect(ordersService.create).toHaveBeenCalledWith({
-      items: [{ item_id: 1, quantity: 2 }],
-    })
+    const createPayload = vi.mocked(ordersService.create).mock.calls[0][0]
+    expect(createPayload.items).toEqual([{ item_id: 1, quantity: 2 }])
+    expect(typeof createPayload.idempotency_key).toBe('string')
+    expect(createPayload.idempotency_key).toBeTruthy()
+
     // The server-computed total is what gets paid, not the previewed amount.
-    expect(paymentsService.record).toHaveBeenCalledWith(101, {
-      payment_method: 'cash',
-      amount: 36000,
-    })
+    const payPayload = vi.mocked(paymentsService.record).mock.calls[0][1]
+    expect(payPayload.payment_method).toBe('cash')
+    expect(payPayload.amount).toBe(36000)
+    // One key ties the order and its payment to a single checkout attempt.
+    expect(payPayload.idempotency_key).toBe(createPayload.idempotency_key)
 
     expect(wrapper.text()).toContain('Transaksi berhasil')
     expect(wrapper.text()).toContain('TRX-20260101-0001')
@@ -274,10 +277,70 @@ describe('PosPage', () => {
     await findButton(wrapper, 'Bayar ulang')!.trigger('click')
     await flushPromises()
 
-    // Retry pays the existing order; no second order is created.
+    // Retry pays the existing order; no second order is created and the same
+    // idempotency key is reused.
     expect(ordersService.create).toHaveBeenCalledTimes(1)
     expect(paymentsService.record).toHaveBeenCalledTimes(2)
+    const firstKey = vi.mocked(paymentsService.record).mock.calls[0][1].idempotency_key
+    const secondKey = vi.mocked(paymentsService.record).mock.calls[1][1].idempotency_key
+    expect(secondKey).toBe(firstKey)
     expect(wrapper.text()).toContain('Transaksi berhasil')
+  })
+
+  it('reuses the idempotency key after an unknown-result failure', async () => {
+    vi.mocked(ordersService.create)
+      .mockRejectedValueOnce(
+        new ApiError({
+          message: 'Tidak dapat terhubung ke server. Periksa koneksi Anda.',
+          status: 0,
+          isNetworkError: true,
+        }),
+      )
+      .mockResolvedValueOnce(order())
+    vi.mocked(paymentsService.record).mockResolvedValue(payment())
+    vi.mocked(ordersService.show).mockResolvedValue(
+      order({ payment_status: 'paid', paid_amount: 36000 }),
+    )
+
+    const { wrapper } = mountPage()
+    await flushPromises()
+    await addToCart(wrapper, 'Kopi Susu', 2)
+
+    await findButton(wrapper, 'Proses pembayaran')!.trigger('click')
+    await flushPromises()
+
+    // Result unknown: cart kept, explicit warning, no false success.
+    expect(wrapper.text()).toContain('belum diketahui')
+    expect(wrapper.text()).toContain('Kopi Susu')
+    expect(wrapper.text()).not.toContain('Transaksi berhasil')
+
+    const firstKey = vi.mocked(ordersService.create).mock.calls[0][0].idempotency_key
+
+    await findButton(wrapper, 'Proses pembayaran')!.trigger('click')
+    await flushPromises()
+
+    expect(ordersService.create).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(ordersService.create).mock.calls[1][0].idempotency_key).toBe(firstKey)
+    expect(wrapper.text()).toContain('Transaksi berhasil')
+  })
+
+  it('lets the cashier abandon an unknown attempt and start a new transaction', async () => {
+    vi.mocked(ordersService.create).mockRejectedValueOnce(
+      new ApiError({ message: 'Tidak dapat terhubung ke server.', status: 0, isNetworkError: true }),
+    )
+
+    const { wrapper } = mountPage()
+    await flushPromises()
+    await addToCart(wrapper, 'Kopi Susu')
+
+    await findButton(wrapper, 'Proses pembayaran')!.trigger('click')
+    await flushPromises()
+
+    await findButton(wrapper, 'Mulai transaksi baru')!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Keranjang masih kosong')
+    expect(findButton(wrapper, 'Mulai transaksi baru')).toBeUndefined()
   })
 
   it('prevents double submission while a checkout is in flight', async () => {

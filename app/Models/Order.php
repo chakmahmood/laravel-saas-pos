@@ -23,6 +23,8 @@ class Order extends Model
     protected $fillable = [
         'store_id',
         'order_number',
+        'idempotency_key',
+        'request_fingerprint',
         'customer_id',
         'cashier_id',
         'subtotal',

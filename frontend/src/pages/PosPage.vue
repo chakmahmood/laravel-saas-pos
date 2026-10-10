@@ -195,14 +195,30 @@ function clearCart(): void {
 const paymentMethod = ref<PaymentMethod>('cash')
 const submitting = ref(false)
 const checkoutError = ref('')
-// Set once an order exists but its payment did not complete. Re-clicking
-// checkout retries payment on this same order instead of creating a duplicate.
+// True when the last failure had no trustworthy server answer (network drop or
+// 5xx), so the outcome of the request is unknown.
+const resultUnknown = ref(false)
+// Stable key for the current checkout attempt. Generated once and reused for
+// every retry (order creation AND payment) until the attempt resolves or is
+// explicitly abandoned, so a lost response can never create a duplicate.
+const checkoutKey = ref<string | null>(null)
+// Set once the server confirms an order exists but its payment did not
+// complete. Re-clicking checkout retries payment on this same order.
 const pendingOrder = ref<Order | null>(null)
 const completedOrder = ref<Order | null>(null)
 const showSuccess = ref(false)
 
-const cartLocked = computed(() => submitting.value || pendingOrder.value !== null)
+const hasActiveAttempt = computed(() => checkoutKey.value !== null)
+const cartLocked = computed(() => submitting.value || hasActiveAttempt.value)
 const canCheckout = computed(() => !isEmpty.value && !submitting.value)
+
+function newIdempotencyKey(): string {
+  const cryptoApi = globalThis.crypto
+  if (cryptoApi && typeof cryptoApi.randomUUID === 'function') {
+    return cryptoApi.randomUUID()
+  }
+  return `pos-${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
 
 function describeError(error: ApiError): string {
   if (error.isValidation && error.errors) {
@@ -233,6 +249,11 @@ async function checkout(): Promise<void> {
   }
   submitting.value = true
   checkoutError.value = ''
+  resultUnknown.value = false
+
+  // Generate the key once per attempt and reuse it on every retry.
+  const idempotencyKey = checkoutKey.value ?? newIdempotencyKey()
+  checkoutKey.value = idempotencyKey
 
   try {
     let order = pendingOrder.value
@@ -243,9 +264,10 @@ async function checkout(): Promise<void> {
           item_id: line.id,
           quantity: line.quantity,
         })),
+        idempotency_key: idempotencyKey,
       })
-      // Payment is a separate step. Keep the created order so a failed payment
-      // can be retried without creating a second order.
+      // Payment is a separate step. Keep the confirmed order so a failed
+      // payment can be retried without creating a second one.
       pendingOrder.value = order
     }
 
@@ -253,25 +275,33 @@ async function checkout(): Promise<void> {
       await paymentsService.record(order.id, {
         payment_method: paymentMethod.value,
         amount: order.total_amount,
+        idempotency_key: idempotencyKey,
       })
     }
 
     completedOrder.value = await settleOrder(order)
     pendingOrder.value = null
+    checkoutKey.value = null
     showSuccess.value = true
     clearCart()
   } catch (caught) {
     const error = caught instanceof ApiError ? caught : new ApiError({ message: '', status: 0 })
     checkoutError.value = describeError(error)
+    // A network drop or a 5xx means we do NOT know whether the request was
+    // processed. The key is kept so the next attempt is idempotent; we never
+    // retry blindly with a fresh key.
+    resultUnknown.value = error.isNetworkError || error.isServerError
     toast.error(checkoutError.value)
   } finally {
     submitting.value = false
   }
 }
 
-/** Abandon a pending (unpaid) order and start over with an empty cart. */
+/** Abandon the current attempt and start over with an empty cart. */
 function startNewTransaction(): void {
   pendingOrder.value = null
+  checkoutKey.value = null
+  resultUnknown.value = false
   checkoutError.value = ''
   clearCart()
 }
@@ -294,6 +324,8 @@ watch(
     search.value = ''
     cart.value = []
     pendingOrder.value = null
+    checkoutKey.value = null
+    resultUnknown.value = false
     checkoutError.value = ''
     completedOrder.value = null
     showSuccess.value = false
@@ -461,7 +493,21 @@ onMounted(() => void loadProducts())
           </div>
 
           <div class="border-t border-hairline px-4 py-4">
-            <div v-if="pendingOrder" class="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2">
+            <div
+              v-if="resultUnknown"
+              class="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2"
+            >
+              <p class="text-xs text-amber-200">
+                Koneksi terputus sebelum server memberi konfirmasi, jadi hasilnya belum diketahui.
+                Menekan <span class="font-semibold">Proses pembayaran</span> akan mencoba lagi
+                dengan permintaan yang sama (aman, tidak membuat order ganda), atau mulai transaksi
+                baru.
+              </p>
+            </div>
+            <div
+              v-else-if="pendingOrder"
+              class="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2"
+            >
               <p class="text-xs text-amber-200">
                 Order <span class="font-semibold">{{ pendingOrder.order_number }}</span> sudah dibuat
                 tetapi pembayaran belum selesai. Pesanan tetap tersimpan dan belum dibayar.
@@ -523,7 +569,7 @@ onMounted(() => void loadProducts())
                 {{ pendingOrder ? 'Bayar ulang' : 'Proses pembayaran' }}
               </AppButton>
               <AppButton
-                v-if="pendingOrder"
+                v-if="hasActiveAttempt"
                 block
                 variant="secondary"
                 :disabled="submitting"
