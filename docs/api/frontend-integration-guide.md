@@ -14,7 +14,8 @@
 
 ### Alur
 1. **Registrasi** `POST /api/auth/register` — membuat user, store pertama,
-   membership `owner`, langganan Free, dan token. `business_type` opsional.
+   membership `owner`, langganan Free, dan token. `business_type` **wajib**
+   (`retail` = Toko & Penjualan, `service` = Jasa & Servis).
 2. **Login** `POST /api/auth/login` — mengembalikan token baru.
 3. **Logout** `POST /api/auth/logout` — mencabut token yang sedang dipakai.
 4. **Ganti kata sandi** `POST /api/auth/change-password`
@@ -138,7 +139,7 @@ per endpoint.
 - `StockMovementType`: opening, purchase_in, sale_out, adjustment_in,
   adjustment_out, transfer_in, transfer_out, return_in, return_out,
   reservation, reservation_release, reversal
-- `BusinessType`: retail, restaurant, laundry, repair, salon, other
+- `BusinessType`: retail, service (lihat `docs/business-types.md`)
 - `StoreRole`: owner, admin, cashier
 - `MembershipStatus`: active, inactive
 

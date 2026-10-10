@@ -38,7 +38,7 @@ trait InteractsWithInventory
     protected function nonInventoryStore(): array
     {
         $owner = User::factory()->create();
-        $store = $this->createStore($owner, ['business_type' => BusinessType::LAUNDRY->value]);
+        $store = $this->createStore($owner, ['business_type' => BusinessType::SERVICE->value]);
         $this->attachMember($owner, $store, StoreRole::OWNER->value, true);
 
         return [$owner, $store];

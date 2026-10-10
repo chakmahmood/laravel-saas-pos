@@ -67,7 +67,7 @@ echo trim(Artisan::output())."\n\n";
 
 /* --------------------------------------------------------------- fixtures */
 
-function makeStore(string $label, bool $withShift = true, string $businessType = 'other'): array
+function makeStore(string $label, bool $withShift = true, string $businessType = 'service'): array
 {
     $suffix = $label.'-'.bin2hex(random_bytes(4));
 

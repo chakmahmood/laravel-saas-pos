@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Universal POS SaaS API
-  version: "0.3.0"
+  version: "0.4.0"
   description: |
     API backend Universal POS SaaS (Laravel 13 + Sanctum), multi-tenant per
     store. Semua endpoint bisnis memerlukan token Bearer dan konteks store aktif.
@@ -361,7 +361,12 @@ components:
       enum: [opening, purchase_in, sale_out, adjustment_in, adjustment_out, transfer_in, transfer_out, return_in, return_out, reservation, reservation_release, reversal]
     BusinessType:
       type: string
-      enum: [retail, restaurant, laundry, repair, salon, other]
+      enum: [retail, service]
+      description: |
+        Grup bisnis utama (canonical). `retail` = Toko & Penjualan (warung,
+        toko, kafe, restoran). `service` = Jasa & Servis (laundry, bengkel,
+        salon, reparasi). Nilai lama (restaurant/laundry/repair/salon/other)
+        masih diterima saat transisi dan dinormalisasi ke grup canonical.
     StoreRole:
       type: string
       enum: [owner, admin, cashier]
@@ -399,7 +404,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [name, email, password, password_confirmation, store_name, store_slug]
+              required: [name, email, password, password_confirmation, store_name, store_slug, business_type]
               properties:
                 name: { type: string, maxLength: 100 }
                 email: { type: string, format: email, maxLength: 255 }
@@ -407,7 +412,10 @@ paths:
                 password_confirmation: { type: string }
                 store_name: { type: string, maxLength: 150 }
                 store_slug: { type: string, maxLength: 100 }
-                business_type: { $ref: '#/components/schemas/BusinessType' }
+                business_type:
+                  allOf:
+                    - $ref: '#/components/schemas/BusinessType'
+                  description: Wajib. Grup bisnis toko pertama. Alias lama dinormalisasi ke `retail`/`service`.
       responses:
         '201':
           description: Registrasi berhasil (membuat store, membership owner, free subscription, token).

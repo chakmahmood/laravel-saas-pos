@@ -1,10 +1,14 @@
-export type BusinessType =
-  | 'retail'
-  | 'restaurant'
-  | 'laundry'
-  | 'repair'
-  | 'salon'
-  | 'other'
+/**
+ * Canonical primary business group of a store (mirrors `App\Enums\BusinessType`).
+ *
+ * Exactly two groups exist:
+ * - `retail`  → "Toko & Penjualan" (warung, toko, kafe, restoran, produk/menu).
+ * - `service` → "Jasa & Servis" (laundry, bengkel, salon, reparasi, layanan).
+ *
+ * Laundry/workshop/salon are workflow templates inside `service`, not separate
+ * business types.
+ */
+export type BusinessType = 'retail' | 'service'
 
 export type StoreRole = 'owner' | 'admin' | 'cashier'
 
@@ -26,13 +30,16 @@ export function itemTypeLabel(type: ItemType | null | undefined): string {
 
 
 export const BUSINESS_TYPE_LABELS: Record<BusinessType, string> = {
-  retail: 'Retail / Toko',
-  restaurant: 'Kafe & Restoran',
-  laundry: 'Laundry',
-  repair: 'Servis & Reparasi',
-  salon: 'Salon & Barbershop',
-  other: 'Lainnya',
+  retail: 'Toko & Penjualan',
+  service: 'Jasa & Servis',
 }
+
+export const BUSINESS_TYPE_DESCRIPTIONS: Record<BusinessType, string> = {
+  retail: 'Untuk warung, toko, kafe, restoran, dan usaha penjualan produk atau menu.',
+  service: 'Untuk laundry, bengkel, salon, reparasi, dan usaha layanan.',
+}
+
+export const BUSINESS_TYPE_VALUES: BusinessType[] = ['retail', 'service']
 
 export const STORE_ROLE_LABELS: Record<StoreRole, string> = {
   owner: 'Pemilik',
@@ -40,8 +47,8 @@ export const STORE_ROLE_LABELS: Record<StoreRole, string> = {
   cashier: 'Kasir',
 }
 
-/** Business types whose store supports the inventory module. */
-export const INVENTORY_BUSINESS_TYPES: BusinessType[] = ['retail', 'restaurant']
+/** Business groups whose store supports the inventory module. */
+export const INVENTORY_BUSINESS_TYPES: BusinessType[] = ['retail']
 
 export function usesInventory(type: BusinessType | null | undefined): boolean {
   return type !== null && type !== undefined && INVENTORY_BUSINESS_TYPES.includes(type)
@@ -49,6 +56,11 @@ export function usesInventory(type: BusinessType | null | undefined): boolean {
 
 export function businessTypeLabel(type: BusinessType | null | undefined): string {
   return type ? BUSINESS_TYPE_LABELS[type] : '—'
+}
+
+/** Catalog label adapts to the active store: "Layanan" for service, else "Produk". */
+export function catalogLabel(type: BusinessType | null | undefined): string {
+  return type === 'service' ? 'Layanan' : 'Produk'
 }
 
 export function storeRoleLabel(role: StoreRole | null | undefined): string {

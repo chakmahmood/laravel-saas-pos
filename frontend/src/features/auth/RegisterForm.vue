@@ -7,7 +7,12 @@ import AppPasswordInput from '@/components/ui/AppPasswordInput.vue'
 import AppSelect from '@/components/ui/AppSelect.vue'
 import { ApiError, humanMessage } from '@/lib/errors'
 import { useAuthStore } from '@/stores/auth'
-import { BUSINESS_TYPE_LABELS, type BusinessType } from '@/types/enums'
+import {
+  BUSINESS_TYPE_DESCRIPTIONS,
+  BUSINESS_TYPE_LABELS,
+  BUSINESS_TYPE_VALUES,
+  type BusinessType,
+} from '@/types/enums'
 import type { RegisterPayload } from '@/types/models'
 
 const emit = defineEmits<{ (event: 'success'): void }>()
@@ -27,10 +32,16 @@ const formError = ref('')
 const fieldErrors = ref<Record<string, string>>({})
 
 const businessOptions = computed(() =>
-  (Object.keys(BUSINESS_TYPE_LABELS) as BusinessType[]).map((value) => ({
+  BUSINESS_TYPE_VALUES.map((value) => ({
     value,
     label: BUSINESS_TYPE_LABELS[value],
   })),
+)
+
+const businessDescription = computed(() =>
+  businessType.value === '' || businessType.value === null
+    ? ''
+    : BUSINESS_TYPE_DESCRIPTIONS[businessType.value as BusinessType],
 )
 
 function slugify(value: string): string {
@@ -57,6 +68,7 @@ async function onSubmit(): Promise<void> {
     ['password', password.value, 'Kata sandi wajib diisi.'],
     ['store_name', storeName.value, 'Nama toko wajib diisi.'],
     ['store_slug', storeSlug.value, 'Slug toko wajib diisi.'],
+    ['business_type', businessType.value, 'Jenis usaha wajib dipilih.'],
   ]
   for (const [field, value, message] of required) {
     if (value.trim() === '') {
@@ -79,9 +91,7 @@ async function onSubmit(): Promise<void> {
       password_confirmation: passwordConfirmation.value,
       store_name: storeName.value.trim(),
       store_slug: storeSlug.value.trim(),
-    }
-    if (businessType.value !== '') {
-      payload.business_type = businessType.value as BusinessType
+      business_type: businessType.value as BusinessType,
     }
     await auth.register(payload)
     emit('success')
@@ -180,12 +190,14 @@ async function onSubmit(): Promise<void> {
     />
     <AppSelect
       v-model="businessType"
-      label="Jenis bisnis"
+      label="Jenis usaha"
       name="business_type"
-      placeholder="Pilih jenis bisnis (opsional)"
+      placeholder="Pilih jenis usaha"
       :options="businessOptions"
+      required
       :error="fieldErrors.business_type"
     />
+    <p v-if="businessDescription" class="text-xs text-slate-400">{{ businessDescription }}</p>
 
     <AppButton type="submit" block :loading="submitting" :disabled="submitting">
       {{ submitting ? 'Memproses…' : 'Daftar & Buat Toko' }}

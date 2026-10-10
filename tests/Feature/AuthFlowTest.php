@@ -25,6 +25,7 @@ class AuthFlowTest extends TestCase
             'password_confirmation' => 'password123',
             'store_name' => 'Toko Budi',
             'store_slug' => 'toko-budi',
+            'business_type' => 'retail',
         ]);
 
         $response->assertCreated()

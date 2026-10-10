@@ -7,7 +7,7 @@ import AppCard from '@/components/ui/AppCard.vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useCurrentStoreStore } from '@/stores/currentStore'
-import { businessTypeLabel, storeRoleLabel } from '@/types/enums'
+import { businessTypeLabel, catalogLabel, storeRoleLabel } from '@/types/enums'
 
 const auth = useAuthStore()
 const store = useCurrentStoreStore()
@@ -22,6 +22,10 @@ const modules = computed(() =>
       const meta = router.resolve({ name: item.name }).meta
       return {
         ...item,
+        label:
+          item.name === 'products'
+            ? catalogLabel(store.current?.business_type)
+            : item.label,
         stage: meta.moduleStage ?? 'Mendatang',
         description: meta.moduleDescription ?? '',
       }

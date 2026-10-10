@@ -2,9 +2,11 @@
 
 namespace Tests\Feature;
 
+use App\Enums\BusinessType;
 use App\Models\Store;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Tests\Concerns\InteractsWithInventory;
 use Tests\Concerns\InteractsWithTenants;
 use Tests\TestCase;
@@ -45,28 +47,26 @@ class InventoryProvisioningTest extends TestCase
         $this->assertSame((string) $store->id, $location->default_guard);
     }
 
-    public function test_registering_a_non_inventory_store_does_not_create_a_location(): void
+    public function test_registering_a_service_store_does_not_create_a_location(): void
     {
         $this->freePlan();
 
-        $this->postJson('/api/auth/register', $this->registerPayload('laundry', [
-            'business_type' => 'laundry',
+        $this->postJson('/api/auth/register', $this->registerPayload('service', [
+            'business_type' => 'service',
         ]))->assertCreated();
 
-        $store = Store::query()->where('slug', 'laundry')->firstOrFail();
+        $store = Store::query()->where('slug', 'service')->firstOrFail();
 
         $this->assertSame(0, $store->stockLocations()->count());
     }
 
-    public function test_registering_without_business_type_defaults_to_other_without_a_location(): void
+    public function test_registering_without_business_type_is_rejected(): void
     {
         $this->freePlan();
 
-        $this->postJson('/api/auth/register', $this->registerPayload('plain'))->assertCreated();
-
-        $store = Store::query()->where('slug', 'plain')->firstOrFail();
-
-        $this->assertSame(0, $store->stockLocations()->count());
+        $this->postJson('/api/auth/register', $this->registerPayload('plain'))
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('business_type');
     }
 
     public function test_provision_command_only_processes_inventory_stores(): void
@@ -90,5 +90,28 @@ class InventoryProvisioningTest extends TestCase
         $this->artisan('stock:provision-locations')->assertSuccessful();
 
         $this->assertSame(1, $retail->stockLocations()->where('is_default', true)->count());
+    }
+
+    public function test_provision_command_processes_legacy_inventory_aliases(): void
+    {
+        // Raw insert bypasses the model cast, emulating un-normalized legacy data.
+        $owner = User::factory()->create();
+
+        DB::table('stores')->insert([
+            'owner_id' => $owner->id,
+            'name' => 'Legacy Resto',
+            'slug' => 'legacy-resto',
+            'is_active' => true,
+            'business_type' => 'restaurant',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->artisan('stock:provision-locations')->assertSuccessful();
+
+        $store = Store::query()->where('slug', 'legacy-resto')->firstOrFail();
+
+        $this->assertSame(1, $store->stockLocations()->where('is_default', true)->count());
+        $this->assertSame(BusinessType::RETAIL, $store->business_type);
     }
 }

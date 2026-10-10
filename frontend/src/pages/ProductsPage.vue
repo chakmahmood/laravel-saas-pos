@@ -20,9 +20,10 @@ import { formatCurrency } from '@/lib/format'
 import { useCurrentStoreStore } from '@/stores/currentStore'
 import { useToastStore } from '@/stores/toast'
 import type { PaginationMeta } from '@/types/api'
-import { ITEM_TYPE_LABELS, ITEM_TYPE_VALUES, itemTypeLabel, type ItemType } from '@/types/enums'
+import { ITEM_TYPE_LABELS, ITEM_TYPE_VALUES, catalogLabel, itemTypeLabel, type ItemType } from '@/types/enums'
 
 const store = useCurrentStoreStore()
+const catalogTitle = computed(() => catalogLabel(store.current?.business_type))
 const toast = useToastStore()
 
 const rows = ref<Product[]>([])
@@ -208,12 +209,12 @@ onMounted(() => {
   <div class="space-y-6">
     <header class="flex flex-wrap items-start justify-between gap-4">
       <div>
-        <h1 class="text-xl font-semibold text-white">Produk</h1>
+        <h1 class="text-xl font-semibold text-white">{{ catalogTitle }}</h1>
         <p class="mt-1 text-sm text-slate-400">
           Kelola katalog produk, jasa, menu, dan paket toko Anda.
         </p>
       </div>
-      <AppButton v-if="canManage" @click="openCreate">Tambah Produk</AppButton>
+      <AppButton v-if="canManage" @click="openCreate">Tambah {{ catalogTitle }}</AppButton>
     </header>
 
     <div class="rounded-xl border border-hairline bg-panel shadow-panel">
@@ -239,16 +240,16 @@ onMounted(() => {
       <AppEmptyState
         v-else-if="rows.length === 0"
         icon="box"
-        :title="hasFilters ? 'Tidak ada produk yang cocok' : 'Belum Ada Produk'"
+        :title="hasFilters ? `Tidak ada ${catalogTitle.toLowerCase()} yang cocok` : `Belum Ada ${catalogTitle}`"
         :description="
           hasFilters
             ? 'Coba ubah kata kunci atau filter.'
-            : 'Tambahkan produk pertama untuk mulai berjualan.'
+            : `Tambahkan ${catalogTitle.toLowerCase()} pertama untuk mulai berjualan.`
         "
       >
         <template #actions>
           <AppButton v-if="canManage && !hasFilters" size="sm" @click="openCreate">
-            Tambah Produk
+            Tambah {{ catalogTitle }}
           </AppButton>
         </template>
       </AppEmptyState>

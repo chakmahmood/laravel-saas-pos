@@ -386,6 +386,7 @@ class TeamManagementTest extends TestCase
             'password_confirmation' => 'password123',
             'store_name' => 'Toko Owner',
             'store_slug' => 'toko-owner',
+            'business_type' => 'retail',
         ])->assertCreated();
 
         $owner = User::query()->where('email', 'owner@example.com')->firstOrFail();

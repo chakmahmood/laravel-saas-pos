@@ -129,13 +129,16 @@ class StockLocationProvisioner
     }
 
     /**
+     * Every raw `stores.business_type` value that maps to an inventory-capable
+     * group. Includes legacy aliases (e.g. `restaurant`) so un-normalized rows
+     * are still provisioned during the transition.
+     *
      * @return array<int, string>
      */
     private function inventoryBusinessTypes(): array
     {
-        return collect(BusinessType::cases())
-            ->filter(fn (BusinessType $type): bool => $type->usesInventory())
-            ->map(fn (BusinessType $type): string => $type->value)
+        return collect(BusinessType::acceptedInputValues())
+            ->filter(fn (string $value): bool => BusinessType::canonicalize($value)->usesInventory())
             ->values()
             ->all();
     }

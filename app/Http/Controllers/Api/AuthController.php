@@ -68,12 +68,16 @@ class AuthController extends Controller
             ],
 
             /*
-             * Optional. Existing clients that do not send it keep the
-             * `other` default, so this validation is backward compatible.
+             * Required. The two canonical groups are `retail` ("Toko &
+             * Penjualan") and `service` ("Jasa & Servis"). Legacy aliases
+             * (restaurant/laundry/repair/salon/other) are still accepted and
+             * normalized during the transition so older clients keep working;
+             * anything else is rejected.
              */
             'business_type' => [
-                'nullable',
-                Rule::enum(BusinessType::class),
+                'required',
+                'string',
+                Rule::in(BusinessType::acceptedInputValues()),
             ],
         ]);
 
@@ -94,8 +98,9 @@ class AuthController extends Controller
                 'owner_id' => $user->id,
                 'name' => $validated['store_name'],
                 'slug' => $validated['store_slug'],
-                'business_type' => $validated['business_type']
-                    ?? BusinessType::OTHER->value,
+                'business_type' => BusinessType::canonicalize(
+                    $validated['business_type'],
+                )->value,
             ]);
 
             /*

@@ -71,10 +71,10 @@ describe('currentStore store', () => {
   it('selects a store and updates capability flags', async () => {
     vi.mocked(sessionService.selectStore).mockResolvedValue({
       id: 2,
-      name: 'Toko Laundry',
-      slug: 'toko-laundry',
+      name: 'Toko Jasa',
+      slug: 'toko-jasa',
       role: 'admin',
-      business_type: 'laundry',
+      business_type: 'service',
       is_active: true,
     })
 

@@ -19,8 +19,10 @@ Prinsip utama:
 
 1. **Satu fondasi universal** — kategori, katalog item, pelanggan, order,
    pembayaran, sesi kasir, laporan penjualan dipakai semua jenis bisnis.
-2. **Modul industri sebagai ekstensi** — retail, F&B, laundry, servis, salon
-   menambah tabel/workflow sendiri, tidak mencampur semuanya ke satu tabel.
+2. **Grup bisnis + template workflow sebagai ekstensi** — dua grup canonical
+   (`retail`, `service`); F&B memakai `retail`, laundry/bengkel/salon memakai
+   `service`; modul industri spesifik menambah tabel/workflow sendiri, tidak
+   mencampur semuanya ke satu tabel.
 3. **Tenant isolation by token** — toko aktif ditentukan server, bukan client.
 4. **Uang dalam satuan terkecil** (integer), tanpa `float`/`double`.
 5. **Snapshot pada transaksi** — order menyimpan salinan data item/harga.
@@ -153,8 +155,9 @@ snapshot.
 - Tanggung jawab: token API + konteks toko aktif per token.
 
 #### `business_type` (enum PHP `App\Enums\BusinessType`)
-- Nilai: `retail`, `restaurant`, `laundry`, `repair`, `salon`, `other`.
-- Kolom `stores.business_type` sudah ada; register menerima nilai opsional.
+- Nilai canonical: `retail`, `service` (lihat `docs/business-types.md`).
+- Kolom `stores.business_type`; register **wajib** mengirim `business_type`;
+  nilai lama dinormalisasi lewat cast kompatibilitas.
 
 ### 4.2 Universal POS — status per Phase 2
 
@@ -528,49 +531,52 @@ besar yang menggabungkan seluruh kebutuhan industri.
 
 ---
 
-## 8. Business Type & Konfigurasi Store
+## 8. Business Type, Katalog, dan Template Workflow
 
-### 8.1 Penyimpanan sebagai kolom `stores.business_type`
+### 8.1 Dua tipe bisnis utama (canonical)
 
-**Rekomendasi: kolom `string(30)` dengan nilai tervalidasi oleh enum PHP
-`App\Enums\BusinessType`.** (Sudah diimplementasikan.)
+`stores.business_type` divalidasi oleh enum PHP `App\Enums\BusinessType` yang
+hanya memiliki **dua** nilai canonical:
 
-Alasan:
-- Satu store = satu jenis bisnis utama pada fase awal.
-- Enum PHP memberi type-safety di kode + validasi `Rule::enum` di API.
-- String kolom (bukan DB `ENUM`) memudahkan penambahan tipe baru tanpa
-  migrasi `ALTER ENUM` yang kaku.
-- Backward-compatible: `default('other')` sehingga toko lama dan request
-  register tanpa `business_type` tetap valid.
+- `retail` — Toko & Penjualan (warung, toko, kafe, restoran, produk/menu);
+  inventory aktif.
+- `service` — Jasa & Servis (laundry, bengkel, salon, reparasi); tanpa
+  inventory.
 
-### 8.2 Validasi & default toko lama
+Kafe/restoran = `retail`. Laundry/bengkel/salon = `service`. Template workflow
+(`general_service`, `laundry`, `workshop`, `salon`) adalah konsep **terpisah**
+dan belum dipersistensi. Detail: `docs/business-types.md`.
 
-- Migrasi: `business_type` default `other`, ditambahkan index.
-- Validasi register: `nullable|Rule::enum(BusinessType::class)`.
-- Toko existing otomatis `other`; pemilik dapat memperbarui nanti.
+### 8.2 Kompatibilitas nilai lama
 
-### 8.3 Fitur opsional & konfigurasi operasional
+Nilai lama (`restaurant`, `laundry`, `repair`, `salon`, `other`) dipetakan ke
+canonical lewat `BusinessType::canonicalize()` + `App\Casts\BusinessTypeCast`:
+`retail`/`restaurant` → `retail`; `laundry`/`repair`/`salon`/`other` →
+`service`. Model selalu membaca/menulis canonical; input lama masih diterima
+(expand) dan backfill data tersedia sebagai migrasi terpisah (belum dijalankan).
+
+### 8.3 Validasi & default
+
+- Register `POST /api/auth/register`: `business_type` **wajib** (`Rule::in`
+  canonical + alias lama).
+- Kolom: `string(30)`, default canonical `service` (menggantikan default lama
+  `other`).
+- Tidak ada endpoint yang mengubah `business_type` setelah toko dibuat.
+
+### 8.4 Fitur opsional & konfigurasi operasional
 
 - **Jangan** membuat puluhan boolean (`is_cafe`, `is_laundry`, ...) di `stores`.
-- Gunakan `business_type` sebagai gerbang utama, lalu **tabel `store_settings`
-  atau kolom JSON `settings`** untuk konfigurasi operasional (pajak default,
-  service charge, pembulatan, template struk). **Rencana**, belum
-  diimplementasikan — lihat keputusan yang butuh persetujuan.
-- Perilaku modul (mis. apakah inventory aktif) diturunkan dari `business_type`
-  + settings, bukan dari banyak flag.
-
-### 8.4 Multi-jenis per toko
-
-- Fase awal: **satu** `business_type` per store. Multi-jenis (mis. toko +
-  kafe dalam satu store) direncanakan sebagai pivot `store_business_types`
-  pada fase lanjutan, **tidak** diimplementasikan sekarang.
+- Gunakan `business_type` sebagai gerbang utama grup, lalu **tabel
+  `store_settings` atau kolom JSON `settings`** untuk konfigurasi operasional
+  (pajak default, service charge, pembulatan, template struk) dan pemilihan
+  workflow profile. **Rencana**, belum diimplementasikan — lihat keputusan yang
+  butuh persetujuan.
 
 ### 8.5 Dampak API
 
-- `POST /api/auth/register` menerima `business_type` **opsional** (tidak
-  breaking). Response store menambah field `business_type` (aditif).
-- `GET /api/current-store`, `PUT /api/current-store`, `GET /api/me` menambah
-  field `business_type` pada objek store (aditif, non-breaking).
+- `POST /api/auth/register` **mewajibkan** `business_type`.
+- `GET /api/current-store`, `PUT /api/current-store`, `GET /api/me`, dan
+  respons register mengembalikan `business_type` **canonical** pada objek store.
 
 ---
 

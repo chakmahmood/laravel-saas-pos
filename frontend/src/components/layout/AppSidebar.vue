@@ -5,7 +5,7 @@ import { NAV_SECTIONS } from '@/app/navigation'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import { env } from '@/lib/env'
 import { useCurrentStoreStore } from '@/stores/currentStore'
-import { businessTypeLabel, storeRoleLabel } from '@/types/enums'
+import { businessTypeLabel, catalogLabel, storeRoleLabel } from '@/types/enums'
 
 withDefaults(defineProps<{ mobile?: boolean }>(), { mobile: false })
 
@@ -16,11 +16,19 @@ const store = useCurrentStoreStore()
 const sections = computed(() =>
   NAV_SECTIONS.map((section) => ({
     label: section.label,
-    items: section.items.filter(
-      (item) =>
-        (!item.inventoryOnly || store.inventoryEnabled) &&
-        (!item.managerOnly || store.canManage),
-    ),
+    items: section.items
+      .filter(
+        (item) =>
+          (!item.inventoryOnly || store.inventoryEnabled) &&
+          (!item.managerOnly || store.canManage),
+      )
+      .map((item) => ({
+        ...item,
+        label:
+          item.name === 'products'
+            ? catalogLabel(store.current?.business_type)
+            : item.label,
+      })),
   })).filter((section) => section.items.length > 0),
 )
 </script>

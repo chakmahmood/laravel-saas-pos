@@ -31,6 +31,10 @@ fondasi tanpa membangun fitur POS.
 - [x] Tetapkan batas modul umum vs industri.
 - [x] Tambah `business_type` (enum + migrasi + factory + test) secara
       backward-compatible.
+- [x] **Refaktor business type canonical (Phase 3E):** hanya `retail` &
+      `service`; kafe/restoran → `retail`, laundry/bengkel/salon → `service`;
+      cast kompatibilitas nilai lama + migrasi backfill (belum dijalankan);
+      dokumen `docs/business-types.md`.
 - [x] Tulis `docs/universal-pos-architecture.md` & roadmap ini.
 - [ ] **Persetujuan pengguna** atas keputusan di §13 arsitektur.
 
@@ -261,7 +265,10 @@ Lihat `frontend/README.md` dan `docs/api/frontend-integration-guide.md`.
 
 ## Phase 4 — Modul Industri (prioritas menyesuaikan bisnis)
 
-Dibangun **di atas** `items`/`orders`/`customers`. Pilih sesuai kebutuhan.
+Dibangun **di atas** `items`/`orders`/`customers`. **Catatan:** ini adalah
+template workflow di dalam grup canonical, bukan tipe bisnis baru. F&B berada
+di grup `retail`; laundry/bengkel/salon berada di grup `service`. Lihat
+`docs/business-types.md`.
 
 ### Retail / F&B — Inventory
 - [x] Fondasi ledger/saldo/lokasi (`stock_locations`, `stock_balances`,
@@ -270,19 +277,21 @@ Dibangun **di atas** `items`/`orders`/`customers`. Pilih sesuai kebutuhan.
 - [ ] `suppliers`, `purchases`, `purchase_items`, `stock_opnames`, `returns`.
 - [ ] Stok masuk/keluar terhubung `orders` & pembelian.
 
-### F&B
+### F&B (grup `retail`)
 - [ ] `modifier_groups`/`modifier_options` + pivot item.
 - [ ] `dining_tables`, `kitchen_tickets`.
 - [ ] (Opsional) resep/ingredient.
 
-### Laundry
-- [ ] `laundry_jobs`: berat/kuantitas, satuan, status pengerjaan, estimasi,
-      pengambilan.
+### Laundry (template workflow `service`)
+- [ ] Pengaturan `service_workflow` (default `general_service`).
+- [ ] `laundry_jobs`: berat/kuantitas desimal, satuan, status pengerjaan,
+      estimasi, tanggal selesai, pengambilan.
 
-### Servis/Reparasi
-- [ ] `customer_assets`, `repair_jobs`, `repair_job_parts`, status pengerjaan.
+### Servis/Bengkel (template workflow `service`)
+- [ ] `customer_assets`, `repair_jobs`, `repair_job_parts`, status pengerjaan,
+      estimasi biaya & selesai.
 
-### Salon/Barbershop
+### Salon (template workflow `service`)
 - [ ] `appointments`, `staff_services`, durasi, komisi.
 
 ### Lintas industri

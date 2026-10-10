@@ -7,7 +7,7 @@
 > Prefix `/api`, tanpa versioning.
 
 Inventory hanya tersedia untuk store yang `BusinessType::usesInventory()`
-(`retail`, `restaurant`). Store lain menerima **403 `inventory_not_available`**
+(grup `retail`). Store grup `service` menerima **403 `inventory_not_available`**
 pada semua endpoint di bawah ini (termasuk read-only).
 
 Desain & aturan internal: `docs/inventory-design.md`.

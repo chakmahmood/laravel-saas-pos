@@ -68,10 +68,10 @@ trait InteractsWithTenants
      *
      * @return array{0: User, 1: Store}
      */
-    protected function createOwnerWithStore(): array
+    protected function createOwnerWithStore(string $businessType = 'retail'): array
     {
         $user = User::factory()->create();
-        $store = $this->createStore($user);
+        $store = $this->createStore($user, ['business_type' => $businessType]);
         $this->attachMember($user, $store, StoreRole::OWNER->value, true);
 
         return [$user, $store];

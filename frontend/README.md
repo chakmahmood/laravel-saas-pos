@@ -130,18 +130,26 @@ src/
 | `/select-store` | select-store | butuh autentikasi |
 | `/ganti-password` | change-password | autentikasi (dikecualikan dari guard wajib ganti sandi) |
 | `/dashboard` | dashboard | autentikasi + current store |
-| `/produk` | products | tersedia — daftar/tambah/ubah/hapus produk |
+| `/produk` | products | tersedia — daftar/tambah/ubah/hapus produk/layanan |
 | `/kategori` | categories | tersedia — daftar/tambah/ubah/hapus kategori |
 | `/tim` | team | owner/admin — daftar & kelola anggota toko |
 | `/pelanggan`, `/transaksi`, `/pembayaran`, `/sesi-kas`, `/inventory`, `/pengaturan` | modul | placeholder "tersedia pada tahap berikutnya" |
 
-Menu Inventory hanya tampil untuk store yang mendukung inventory (retail,
-restoran). Penyembunyian menu **bukan** kontrol keamanan; backend tetap
+Menu Inventory hanya tampil untuk store pada grup **retail** (yang mendukung
+inventory). Penyembunyian menu **bukan** kontrol keamanan; backend tetap
 memverifikasi.
+
+## Tipe usaha
+
+Registrasi toko memilih **satu** dari dua grup canonical: **Toko & Penjualan**
+(`retail`) atau **Jasa & Servis** (`service`). Kafe, restoran, dan warung
+memakai `retail`; laundry, bengkel, dan salon memakai `service`. Menu katalog
+menyesuaikan grup aktif (Produk untuk retail, Layanan untuk service) dan menu
+Inventory hanya tampil untuk grup `retail`. Lihat `../docs/business-types.md`.
 
 ## Modul tersedia
 
-### Produk (`/produk`)
+### Produk / Layanan (`/produk`)
 - Daftar dengan pencarian (nama/SKU/barcode), filter tipe, kategori, status, dan
   pagination server-side.
 - Tambah/ubah melalui modal; hapus dengan konfirmasi.
