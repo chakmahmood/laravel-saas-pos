@@ -1,6 +1,13 @@
 import { http } from '@/lib/http'
-import type { MessageEnvelope } from '@/types/api'
-import type { Order, OrderCreatePayload, OrderPayment, PaymentCreatePayload } from './types'
+import { cleanParams } from '@/lib/query'
+import type { MessageEnvelope, Paginated } from '@/types/api'
+import type {
+  Order,
+  OrderCreatePayload,
+  OrderListParams,
+  OrderPayment,
+  PaymentCreatePayload,
+} from './types'
 
 /**
  * Order API calls, verified against `App\Http\Controllers\Api\OrderController`,
@@ -13,12 +20,30 @@ async function create(payload: OrderCreatePayload): Promise<Order> {
   return response.data.data
 }
 
+/** Server-side paginated list with filters (transaction history). */
+async function list(params: OrderListParams = {}): Promise<Paginated<Order>> {
+  const response = await http.get<Paginated<Order>>('/orders', { params: cleanParams(params) })
+  return response.data
+}
+
 async function show(id: number): Promise<Order> {
   const response = await http.get<{ data: Order }>(`/orders/${id}`)
   return response.data.data
 }
 
-export const ordersService = { create, show }
+/**
+ * Read-only reconciliation by the client idempotency key. Returns the order when
+ * it exists in the active store; a `404` (`order_not_found`) means no order was
+ * stored under that key (so a retry is safe). Never creates or mutates data.
+ */
+async function reconcile(idempotencyKey: string): Promise<Order> {
+  const response = await http.get<{ data: Order }>('/orders/reconcile', {
+    params: { idempotency_key: idempotencyKey },
+  })
+  return response.data.data
+}
+
+export const ordersService = { create, list, show, reconcile }
 
 /**
  * Payment API calls, verified against

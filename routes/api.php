@@ -232,6 +232,15 @@ Route::middleware('auth:sanctum')->group(function () {
             'store',
         ]);
 
+        /*
+         * Registered before `/orders/{order}` so "reconcile" is not captured as
+         * an order id. Read-only lookup by client idempotency key.
+         */
+        Route::get('/orders/reconcile', [
+            OrderController::class,
+            'reconcile',
+        ]);
+
         Route::get('/orders/{order}', [
             OrderController::class,
             'show',

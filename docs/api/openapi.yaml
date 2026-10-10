@@ -195,6 +195,7 @@ components:
         tax_amount: { type: integer }
         total_amount: { type: integer }
         paid_amount: { type: integer }
+        remaining_amount: { type: integer }
         payment_status: { $ref: '#/components/schemas/PaymentStatus' }
         fulfillment_status: { $ref: '#/components/schemas/FulfillmentStatus' }
         notes: { type: [string, "null"] }
@@ -892,6 +893,7 @@ paths:
                 customer_id: { type: [integer, "null"] }
                 tax_amount: { type: integer, minimum: 0 }
                 notes: { type: [string, "null"], maxLength: 1000 }
+                idempotency_key: { type: string, maxLength: 100 }
                 items:
                   type: array
                   minItems: 1
@@ -908,6 +910,25 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '409':
           description: Konflik inventory (mis. insufficient_stock / inventory_not_supported / stock_location_unavailable).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /orders/reconcile:
+    get:
+      tags: [Orders]
+      summary: Rekonsiliasi order via idempotency key (read-only)
+      parameters:
+        - { name: idempotency_key, in: query, required: true, schema: { type: string, maxLength: 100 } }
+      responses:
+        '200':
+          description: Order milik toko aktif ditemukan.
+          content:
+            application/json:
+              schema: { type: object, properties: { data: { $ref: '#/components/schemas/Order' } } }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404':
+          description: Tidak ditemukan pada toko aktif (order_not_found).
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }

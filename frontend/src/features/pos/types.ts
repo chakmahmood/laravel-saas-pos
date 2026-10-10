@@ -62,6 +62,7 @@ export interface Order {
   tax_amount: number
   total_amount: number
   paid_amount: number
+  remaining_amount: number
   payment_status: OrderPaymentStatus
   fulfillment_status: OrderFulfillmentStatus
   notes: string | null
@@ -80,6 +81,21 @@ export interface OrderCreateItemPayload {
   item_id: number
   quantity: number
   discount_amount?: number
+}
+
+/** Query parameters for `GET /api/orders` (server-side pagination + filters). */
+export interface OrderListParams {
+  page?: number
+  per_page?: number
+  search?: string
+  payment_status?: OrderPaymentStatus
+  fulfillment_status?: OrderFulfillmentStatus
+  customer_id?: number
+  cashier_id?: number
+  date_from?: string
+  date_to?: string
+  sort?: 'placed_at' | 'created_at' | 'order_number' | 'total_amount'
+  direction?: 'asc' | 'desc'
 }
 
 /**
@@ -115,6 +131,24 @@ export const PAYMENT_METHODS: ReadonlyArray<{ value: PaymentMethod; label: strin
   { value: 'other', label: 'Lainnya' },
 ]
 
+export const PAYMENT_STATUS_VALUES: readonly OrderPaymentStatus[] = [
+  'unpaid',
+  'partially_paid',
+  'paid',
+  'refunded',
+]
+
+export const FULFILLMENT_STATUS_VALUES: readonly OrderFulfillmentStatus[] = [
+  'pending',
+  'processing',
+  'completed',
+  'cancelled',
+]
+
+export function paymentMethodLabel(method: PaymentMethod): string {
+  return PAYMENT_METHODS.find((entry) => entry.value === method)?.label ?? method
+}
+
 const PAYMENT_STATUS_LABELS: Record<OrderPaymentStatus, string> = {
   unpaid: 'Belum dibayar',
   partially_paid: 'Dibayar sebagian',
@@ -146,6 +180,21 @@ export function paymentStatusVariant(
     case 'partially_paid':
       return 'warning'
     case 'refunded':
+      return 'danger'
+    default:
+      return 'neutral'
+  }
+}
+
+export function fulfillmentStatusVariant(
+  status: OrderFulfillmentStatus,
+): 'success' | 'info' | 'danger' | 'neutral' {
+  switch (status) {
+    case 'completed':
+      return 'success'
+    case 'processing':
+      return 'info'
+    case 'cancelled':
       return 'danger'
     default:
       return 'neutral'

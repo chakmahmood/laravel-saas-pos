@@ -14,6 +14,7 @@ harga, total, dan status dari client tidak pernah dipercaya.
 |--------|------|-----------|------|
 | GET | `/api/orders` | List (paginate + filter) | owner, admin, cashier |
 | POST | `/api/orders` | Buat order + item (atomik) | owner, admin, cashier |
+| GET | `/api/orders/reconcile` | Rekonsiliasi via `idempotency_key` (read-only) | owner, admin, cashier |
 | GET | `/api/orders/{order}` | Detail (item, customer, pembayaran) | owner, admin, cashier |
 | PATCH | `/api/orders/{order}/fulfillment` | Ubah status pemenuhan | lihat §6 |
 
@@ -121,6 +122,44 @@ order **dan** pembayaran. **Timeout bukan berarti gagal:** retry dengan key yang
 sama menyelesaikan ke hasil yang sama. Ringkasan alur di frontend: retry
 memakai order yang sudah dibuat (bila ada), dan kasir dapat memilih "mulai
 transaksi baru" untuk membuang key.
+
+### 3.2 Rekonsiliasi checkout
+
+`GET /api/orders/reconcile?idempotency_key={key}` — **read-only**. Mengembalikan
+`OrderResource` untuk order milik toko aktif dengan `idempotency_key` tersebut.
+
+- Terautentikasi (`auth:sanctum` + `current.store`); pencarian selalu dibatasi
+  ke toko aktif, bukan dari input frontend.
+- Key milik toko lain tidak dapat dibedakan dari key tak ada → `404`
+  `order_not_found` (tidak membocorkan keberadaan transaksi tenant lain).
+- Tidak membuat atau mengubah order maupun pembayaran.
+- `OrderResource` menyertakan `remaining_amount = max(0, total_amount - paid_amount)`.
+- Validasi: `idempotency_key` wajib, string, maks 100 (→ `422`).
+
+Contoh respons `200`:
+
+```json
+{
+  "data": {
+    "id": 10,
+    "order_number": "TRX-20260101-0001",
+    "total_amount": 10000,
+    "paid_amount": 10000,
+    "remaining_amount": 0,
+    "payment_status": "paid",
+    "fulfillment_status": "pending",
+    "items": [],
+    "customer": null,
+    "payments": []
+  }
+}
+```
+
+Contoh `404`:
+
+```json
+{ "message": "Transaksi dengan kunci idempotensi tersebut tidak ditemukan pada toko ini.", "code": "order_not_found" }
+```
 
 ---
 

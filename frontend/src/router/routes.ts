@@ -70,6 +70,12 @@ export const routes: RouteRecordRaw[] = [
         meta: { title: 'Kasir (POS)' },
       },
       {
+        path: 'riwayat',
+        name: 'order-history',
+        component: () => import('@/pages/OrderHistoryPage.vue'),
+        meta: { title: 'Riwayat Transaksi' },
+      },
+      {
         path: 'pembayaran',
         name: 'payments',
         component: ModulePlaceholderPage,

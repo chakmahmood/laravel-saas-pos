@@ -26,6 +26,8 @@ class OrderResource extends JsonResource
             'tax_amount' => $this->tax_amount,
             'total_amount' => $this->total_amount,
             'paid_amount' => $this->paid_amount,
+            // Remaining balance derived from server-maintained paid_amount.
+            'remaining_amount' => max(0, (int) $this->total_amount - (int) $this->paid_amount),
             'payment_status' => $this->payment_status->value,
             'fulfillment_status' => $this->fulfillment_status->value,
             'notes' => $this->notes,

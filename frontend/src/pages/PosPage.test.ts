@@ -2,17 +2,19 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { ordersService, paymentsService } from '@/features/pos/api'
+import { checkoutContext } from '@/features/pos/checkoutContext'
 import type { Order, OrderPayment } from '@/features/pos/types'
 import { productsService } from '@/features/products/api'
 import type { Product } from '@/features/products/types'
 import { ApiError } from '@/lib/errors'
+import { useAuthStore } from '@/stores/auth'
 import { useCurrentStoreStore } from '@/stores/currentStore'
 import { useToastStore } from '@/stores/toast'
 import type { PaginationMeta } from '@/types/api'
 import PosPage from './PosPage.vue'
 
 vi.mock('@/features/pos/api', () => ({
-  ordersService: { create: vi.fn(), show: vi.fn() },
+  ordersService: { create: vi.fn(), list: vi.fn(), show: vi.fn(), reconcile: vi.fn() },
   paymentsService: { record: vi.fn() },
 }))
 vi.mock('@/features/products/api', () => ({
@@ -67,7 +69,7 @@ function paginated(data: Product[], meta: Partial<PaginationMeta> = {}) {
 }
 
 function order(overrides: Partial<Order> = {}): Order {
-  return {
+  const merged: Order = {
     id: 101,
     order_number: 'TRX-20260101-0001',
     customer_id: null,
@@ -77,6 +79,7 @@ function order(overrides: Partial<Order> = {}): Order {
     tax_amount: 0,
     total_amount: 36000,
     paid_amount: 0,
+    remaining_amount: 36000,
     payment_status: 'unpaid',
     fulfillment_status: 'pending',
     notes: null,
@@ -87,6 +90,11 @@ function order(overrides: Partial<Order> = {}): Order {
     created_at: '2026-01-01T08:00:00.000000Z',
     updated_at: '2026-01-01T08:00:00.000000Z',
     ...overrides,
+  }
+  return {
+    ...merged,
+    remaining_amount:
+      overrides.remaining_amount ?? Math.max(0, merged.total_amount - merged.paid_amount),
   }
 }
 
@@ -115,11 +123,13 @@ function mountPage() {
   setActivePinia(pinia)
   const store = useCurrentStoreStore()
   store.current = { ...retailStore }
+  const auth = useAuthStore()
+  auth.setUser({ id: 9, name: 'Kasir Contoh', email: 'kasir@example.com' })
   const toast = useToastStore()
   const wrapper = mount(PosPage, {
     global: { plugins: [pinia], stubs: { teleport: true } },
   })
-  return { wrapper, store, toast }
+  return { wrapper, store, auth, toast }
 }
 
 function findButton(wrapper: ReturnType<typeof mount>, text: string) {
@@ -136,6 +146,7 @@ async function addToCart(wrapper: ReturnType<typeof mount>, name: string, times 
 describe('PosPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    window.sessionStorage.clear()
     vi.mocked(productsService.list).mockResolvedValue(paginated([product()]))
   })
 
@@ -383,5 +394,121 @@ describe('PosPage', () => {
 
     expect(wrapper.text()).toContain('Keranjang masih kosong')
     expect(wrapper.text()).toContain('Toko Kedua')
+  })
+
+  it('reconciles a persisted attempt on mount and restores the pending order', async () => {
+    vi.mocked(ordersService.reconcile).mockResolvedValue(
+      order({ id: 555, order_number: 'TRX-RESTORED', remaining_amount: 36000 }),
+    )
+    checkoutContext.save({
+      storeId: 1,
+      userId: 9,
+      key: 'persisted-key',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    })
+
+    const { wrapper } = mountPage()
+    await flushPromises()
+
+    expect(ordersService.reconcile).toHaveBeenCalledWith('persisted-key')
+    expect(ordersService.create).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('TRX-RESTORED')
+    expect(wrapper.text()).toContain('belum lunas')
+  })
+
+  it('does not create a second order when a reconciled order exists (payment retry)', async () => {
+    vi.mocked(ordersService.reconcile).mockResolvedValue(
+      order({ id: 555, order_number: 'TRX-RESTORED', remaining_amount: 36000 }),
+    )
+    vi.mocked(paymentsService.record).mockResolvedValue(payment())
+    vi.mocked(ordersService.show).mockResolvedValue(
+      order({
+        id: 555,
+        order_number: 'TRX-RESTORED',
+        payment_status: 'paid',
+        paid_amount: 36000,
+        remaining_amount: 0,
+      }),
+    )
+    checkoutContext.save({
+      storeId: 1,
+      userId: 9,
+      key: 'persisted-key',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    })
+
+    const { wrapper } = mountPage()
+    await flushPromises()
+
+    await findButton(wrapper, 'Bayar ulang')!.trigger('click')
+    await flushPromises()
+
+    expect(ordersService.create).not.toHaveBeenCalled()
+    expect(paymentsService.record).toHaveBeenCalledWith(
+      555,
+      expect.objectContaining({ idempotency_key: 'persisted-key' }),
+    )
+    expect(wrapper.text()).toContain('Transaksi berhasil')
+  })
+
+  it('clears the attempt when reconcile confirms no order was stored', async () => {
+    vi.mocked(ordersService.reconcile).mockRejectedValue(
+      new ApiError({ message: 'not found', status: 404, code: 'order_not_found' }),
+    )
+    checkoutContext.save({
+      storeId: 1,
+      userId: 9,
+      key: 'ghost-key',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    })
+
+    const { wrapper } = mountPage()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Tidak ada transaksi tersimpan')
+    expect(ordersService.create).not.toHaveBeenCalled()
+    expect(checkoutContext.get(1, 9)).toBeNull()
+  })
+
+  it('keeps the attempt when reconcile cannot reach the server', async () => {
+    vi.mocked(ordersService.reconcile).mockRejectedValue(
+      new ApiError({ message: 'offline', status: 0, isNetworkError: true }),
+    )
+    checkoutContext.save({
+      storeId: 1,
+      userId: 9,
+      key: 'unknown-key',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    })
+
+    const { wrapper } = mountPage()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('belum diketahui')
+    expect(checkoutContext.get(1, 9)?.key).toBe('unknown-key')
+    expect(ordersService.create).not.toHaveBeenCalled()
+  })
+
+  it('never reuses another store attempt context', async () => {
+    // A persisted attempt for a DIFFERENT store must be ignored here.
+    checkoutContext.save({
+      storeId: 2,
+      userId: 9,
+      key: 'store-2-key',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    })
+
+    const { store } = mountPage()
+    await flushPromises()
+
+    expect(ordersService.reconcile).not.toHaveBeenCalled()
+
+    vi.mocked(ordersService.reconcile).mockResolvedValue(
+      order({ id: 7, order_number: 'TRX-STORE-2', remaining_amount: 36000 }),
+    )
+    store.current = { ...retailStore, id: 2, name: 'Toko Kedua' }
+    await flushPromises()
+
+    expect(ordersService.reconcile).toHaveBeenCalledWith('store-2-key')
   })
 })

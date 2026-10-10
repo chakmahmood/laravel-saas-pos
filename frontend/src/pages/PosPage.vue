@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import AppBadge from '@/components/ui/AppBadge.vue'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppEmptyState from '@/components/ui/AppEmptyState.vue'
@@ -10,6 +11,7 @@ import AppModal from '@/components/ui/AppModal.vue'
 import AppPagination from '@/components/ui/AppPagination.vue'
 import AppSkeleton from '@/components/ui/AppSkeleton.vue'
 import { ordersService, paymentsService } from '@/features/pos/api'
+import { checkoutContext } from '@/features/pos/checkoutContext'
 import {
   PAYMENT_METHODS,
   fulfillmentStatusLabel,
@@ -23,6 +25,7 @@ import type { Product } from '@/features/products/types'
 import { debounce } from '@/lib/debounce'
 import { ApiError, humanMessage } from '@/lib/errors'
 import { formatCurrency } from '@/lib/format'
+import { useAuthStore } from '@/stores/auth'
 import { useCurrentStoreStore } from '@/stores/currentStore'
 import { useToastStore } from '@/stores/toast'
 import type { PaginationMeta } from '@/types/api'
@@ -52,6 +55,8 @@ interface CartLine {
 
 const store = useCurrentStoreStore()
 const toast = useToastStore()
+const auth = useAuthStore()
+const router = useRouter()
 
 const storeName = computed(() => store.current?.name ?? 'Toko')
 const catalogTitle = computed(() => catalogLabel(store.current?.business_type))
@@ -207,10 +212,17 @@ const checkoutKey = ref<string | null>(null)
 const pendingOrder = ref<Order | null>(null)
 const completedOrder = ref<Order | null>(null)
 const showSuccess = ref(false)
+// Reconciliation against the server (no create/mutate) for an attempt whose
+// outcome was not confirmed.
+const reconciling = ref(false)
+const reconcileNote = ref('')
 
 const hasActiveAttempt = computed(() => checkoutKey.value !== null)
 const cartLocked = computed(() => submitting.value || hasActiveAttempt.value)
-const canCheckout = computed(() => !isEmpty.value && !submitting.value)
+// A restored sandbox may have an empty cart but a pending order to pay for.
+const canCheckout = computed(
+  () => (!isEmpty.value || pendingOrder.value !== null) && !submitting.value,
+)
 
 function newIdempotencyKey(): string {
   const cryptoApi = globalThis.crypto
@@ -218,6 +230,42 @@ function newIdempotencyKey(): string {
     return cryptoApi.randomUUID()
   }
   return `pos-${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
+/** The active (store, user) scope; attempt keys never mix across these. */
+function currentScope(): { storeId: number; userId: number } | null {
+  const currentStore = store.current
+  const user = auth.user
+  if (!currentStore || !user) {
+    return null
+  }
+  return { storeId: currentStore.id, userId: user.id }
+}
+
+function saveAttempt(): void {
+  const scope = currentScope()
+  if (!scope || checkoutKey.value === null) {
+    return
+  }
+  checkoutContext.save({
+    ...scope,
+    key: checkoutKey.value,
+    createdAt: new Date().toISOString(),
+  })
+}
+
+/**
+ * Drop the in-flight attempt. Local context is only cleared once the server
+ * outcome is known (success or confirmed absent), never speculatively.
+ */
+function clearAttempt(): void {
+  const scope = currentScope()
+  if (scope) {
+    checkoutContext.clear(scope.storeId, scope.userId)
+  }
+  pendingOrder.value = null
+  checkoutKey.value = null
+  resultUnknown.value = false
 }
 
 function describeError(error: ApiError): string {
@@ -254,6 +302,7 @@ async function checkout(): Promise<void> {
   // Generate the key once per attempt and reuse it on every retry.
   const idempotencyKey = checkoutKey.value ?? newIdempotencyKey()
   checkoutKey.value = idempotencyKey
+  saveAttempt()
 
   try {
     let order = pendingOrder.value
@@ -280,8 +329,7 @@ async function checkout(): Promise<void> {
     }
 
     completedOrder.value = await settleOrder(order)
-    pendingOrder.value = null
-    checkoutKey.value = null
+    clearAttempt()
     showSuccess.value = true
     clearCart()
   } catch (caught) {
@@ -297,11 +345,61 @@ async function checkout(): Promise<void> {
   }
 }
 
+/**
+ * Read-only check of the current attempt's real outcome on the server. It never
+ * creates or mutates anything; it only restores local state from server truth.
+ */
+async function reconcile(): Promise<void> {
+  const scope = currentScope()
+  if (!scope || checkoutKey.value === null || reconciling.value) {
+    return
+  }
+  reconciling.value = true
+  reconcileNote.value = ''
+  try {
+    const order = await ordersService.reconcile(checkoutKey.value)
+    if (order.remaining_amount <= 0) {
+      completedOrder.value = order
+      clearAttempt()
+      showSuccess.value = true
+    } else {
+      pendingOrder.value = order
+      resultUnknown.value = false
+      reconcileNote.value = `Order ${order.order_number} ditemukan dan belum lunas. Tekan "Bayar ulang" untuk menyelesaikan pembayaran.`
+    }
+  } catch (caught) {
+    const apiError = caught instanceof ApiError ? caught : new ApiError({ message: '', status: 0 })
+    if (apiError.isNotFound) {
+      // Confirmed absent: the attempt never persisted, so it can be dropped.
+      clearAttempt()
+      reconcileNote.value = 'Tidak ada transaksi tersimpan untuk upaya terakhir ini.'
+    } else {
+      resultUnknown.value = true
+      reconcileNote.value = describeError(apiError)
+    }
+  } finally {
+    reconciling.value = false
+  }
+}
+
+/** Restore an in-flight attempt persisted before a reload, then reconcile it. */
+async function restoreAttempt(): Promise<void> {
+  const scope = currentScope()
+  if (!scope || checkoutKey.value !== null) {
+    return
+  }
+  const attempt = checkoutContext.get(scope.storeId, scope.userId)
+  if (!attempt) {
+    return
+  }
+  checkoutKey.value = attempt.key
+  await reconcile()
+}
+
 /** Abandon the current attempt and start over with an empty cart. */
 function startNewTransaction(): void {
-  pendingOrder.value = null
-  checkoutKey.value = null
-  resultUnknown.value = false
+  clearAttempt()
+  reconcileNote.value = ''
   checkoutError.value = ''
   clearCart()
 }
@@ -327,13 +425,19 @@ watch(
     checkoutKey.value = null
     resultUnknown.value = false
     checkoutError.value = ''
+    reconcileNote.value = ''
+    reconciling.value = false
     completedOrder.value = null
     showSuccess.value = false
     void loadProducts()
+    void restoreAttempt()
   },
 )
 
-onMounted(() => void loadProducts())
+onMounted(() => {
+  void loadProducts()
+  void restoreAttempt()
+})
 </script>
 
 <template>
@@ -348,7 +452,13 @@ onMounted(() => void loadProducts())
           Pilih {{ catalogTitle.toLowerCase() }}, susun keranjang, lalu proses pembayaran.
         </p>
       </div>
-      <AppBadge variant="brand">{{ itemCount }} item</AppBadge>
+      <div class="flex items-center gap-2">
+        <AppButton variant="secondary" size="sm" @click="router.push({ name: 'order-history' })">
+          <AppIcon name="history" :size="16" />
+          Riwayat
+        </AppButton>
+        <AppBadge variant="brand">{{ itemCount }} item</AppBadge>
+      </div>
     </header>
 
     <div class="grid gap-5 lg:grid-cols-[minmax(0,1fr)_380px]">
@@ -514,6 +624,13 @@ onMounted(() => void loadProducts())
               </p>
             </div>
 
+            <div
+              v-if="reconcileNote"
+              class="mb-3 rounded-lg border border-hairline bg-panel-2 px-3 py-2"
+            >
+              <p class="text-xs text-slate-300">{{ reconcileNote }}</p>
+            </div>
+
             <dl class="space-y-1.5">
               <div class="flex items-center justify-between text-sm">
                 <dt class="text-slate-400">Subtotal</dt>
@@ -567,6 +684,17 @@ onMounted(() => void loadProducts())
               >
                 <AppIcon name="card" :size="18" />
                 {{ pendingOrder ? 'Bayar ulang' : 'Proses pembayaran' }}
+              </AppButton>
+              <AppButton
+                v-if="hasActiveAttempt"
+                block
+                variant="secondary"
+                :loading="reconciling"
+                :disabled="submitting"
+                @click="reconcile"
+              >
+                <AppIcon name="refresh" :size="16" />
+                Cek hasil transaksi
               </AppButton>
               <AppButton
                 v-if="hasActiveAttempt"

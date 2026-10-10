@@ -107,6 +107,38 @@ class OrderController extends Controller
     }
 
     /**
+     * Read-only reconciliation by client idempotency key.
+     *
+     * Lets a cashier determine the true outcome of a checkout whose response was
+     * lost (timeout / dropped connection) without creating or mutating anything.
+     * The lookup is scoped to the active store, so a key belonging to another
+     * tenant is indistinguishable from a missing key (404, no leak).
+     */
+    public function reconcile(Request $request): OrderResource|JsonResponse
+    {
+        Gate::authorize('viewAny', Order::class);
+
+        $validated = $request->validate([
+            'idempotency_key' => ['required', 'string', 'max:100'],
+        ]);
+
+        $order = $this->currentStore($request)
+            ->orders()
+            ->where('idempotency_key', $validated['idempotency_key'])
+            ->with(['items', 'customer', 'payments'])
+            ->first();
+
+        if ($order === null) {
+            return response()->json([
+                'message' => 'Transaksi dengan kunci idempotensi tersebut tidak ditemukan pada toko ini.',
+                'code' => 'order_not_found',
+            ], 404);
+        }
+
+        return new OrderResource($order);
+    }
+
+    /**
      * Advance the fulfillment status. Cancellation has its own authorization
      * rule and rejects orders with active payments.
      */

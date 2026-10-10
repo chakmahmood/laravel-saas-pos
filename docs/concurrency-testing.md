@@ -65,15 +65,19 @@ men-serialisasi akses pada MySQL InnoDB. Pembukaan shift juga dijaga unique inde
 ### 3.1 Idempotensi order & pembayaran (Phase 3A)
 
 Skenario 13 dan 14 (`run.php`) ditambahkan bersama hardening idempotensi order
-dan pembayaran:
+dan pembayaran. Hasil aktual (`php tests/Concurrency/run.php`, MySQL 8.4.3 /
+InnoDB, exit code `0`):
 
-| Skenario | Beban | Invariant |
-|----------|-------|-----------|
-| Idempotent order | 4 worker, `idempotency_key` sama | Tepat 1 order; semua worker menerima order id yang sama |
-| Idempotent payment | 4 worker bayar order sama, key sama | Tepat 1 pembayaran; order lunas tepat sekali |
+| Skenario | Beban | Hasil | Invariant |
+|----------|-------|-------|-----------|
+| Idempotent order | 4 worker, `idempotency_key=sc13-shared` | `successes=4 distinct_order_ids=1 orders_in_db=1` | Tepat 1 order; semua worker menerima order id yang sama |
+| Idempotent payment | 4 worker bayar order sama, `idempotency_key=sc14-shared` | `successes=4 distinct_payment_ids=1 payments_in_db=1 paid=10000 status=paid` | Tepat 1 pembayaran; order lunas tepat sekali |
 
-> Status: **belum dieksekusi pada checkpoint ini**. Jalankan
-> `php tests/Concurrency/run.php` pada MySQL 8 untuk memverifikasinya.
+Verifikasi independen pada database pengujian: order `sc13-shared` tersimpan
+tepat 1 baris; payment `sc14-shared` tersimpan tepat 1 baris; order terkait
+`paid_amount=10000` dan `payment_status=paid`. Migration idempotensi diterapkan
+**hanya** pada `saas_pos_concurrency_test`; `saas_pos_db` tidak menerima
+migration ini (dikonfirmasi via `information_schema`).
 
 ---
 

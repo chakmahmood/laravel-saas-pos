@@ -33,6 +33,7 @@ export const NAV_SECTIONS: NavSection[] = [
     label: 'Penjualan',
     items: [
       { name: 'orders', label: 'Kasir (POS)', icon: 'receipt' },
+      { name: 'order-history', label: 'Riwayat Transaksi', icon: 'history' },
       { name: 'payments', label: 'Pembayaran', icon: 'card' },
       { name: 'cash-sessions', label: 'Sesi Kas', icon: 'wallet' },
     ],
