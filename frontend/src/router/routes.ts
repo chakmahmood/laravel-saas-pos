@@ -66,13 +66,8 @@ export const routes: RouteRecordRaw[] = [
       {
         path: 'transaksi',
         name: 'orders',
-        component: ModulePlaceholderPage,
-        meta: {
-          title: 'Transaksi',
-          moduleTitle: 'Transaksi',
-          moduleDescription: 'Buat dan kelola order penjualan.',
-          moduleStage: 'Tahap 2',
-        },
+        component: () => import('@/pages/PosPage.vue'),
+        meta: { title: 'Kasir (POS)' },
       },
       {
         path: 'pembayaran',
