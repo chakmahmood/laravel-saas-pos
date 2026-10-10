@@ -207,6 +207,25 @@ Detail desain: `docs/inventory-design.md`; API: `docs/inventory-api.md`.
 
 ---
 
+## Frontend Admin Panel (jalur paralel)
+
+Web admin panel terpisah di `frontend/` (Vue 3 + TypeScript + Vite + Tailwind +
+Pinia + Vue Router). Tidak mengganggu struktur Laravel.
+
+- [x] **FE Checkpoint 1 (Foundation):** struktur app, tema dark premium,
+      API client terpusat + error handling, autentikasi (login/registrasi),
+      pemilihan toko, route guard, layout admin (sidebar/topbar/breadcrumb),
+      dashboard shell yang jujur (tanpa angka palsu), komponen UI reusable.
+      Typecheck, lint, 22 unit/component test, dan production build lulus.
+- [ ] **FE Checkpoint berikutnya:** modul CRUD Produk/Kategori/Pelanggan,
+      lalu Transaksi/Pembayaran/Sesi Kas, disusul Inventory.
+- [ ] Area Super Admin platform (menunggu dukungan backend).
+- [ ] Endpoint analitik/laporan untuk dashboard (menunggu backend).
+
+Lihat `frontend/README.md` dan `docs/api/frontend-integration-guide.md`.
+
+---
+
 ## Phase 4 — Modul Industri (prioritas menyesuaikan bisnis)
 
 Dibangun **di atas** `items`/`orders`/`customers`. Pilih sesuai kebutuhan.
