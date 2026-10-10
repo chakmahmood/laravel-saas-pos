@@ -37,24 +37,14 @@ export const routes: RouteRecordRaw[] = [
       {
         path: 'produk',
         name: 'products',
-        component: ModulePlaceholderPage,
-        meta: {
-          title: 'Produk',
-          moduleTitle: 'Produk',
-          moduleDescription: 'Kelola katalog produk, jasa, menu, dan paket.',
-          moduleStage: 'Tahap 2',
-        },
+        component: () => import('@/pages/ProductsPage.vue'),
+        meta: { title: 'Produk' },
       },
       {
         path: 'kategori',
         name: 'categories',
-        component: ModulePlaceholderPage,
-        meta: {
-          title: 'Kategori',
-          moduleTitle: 'Kategori',
-          moduleDescription: 'Kelompokkan produk untuk memudahkan pencarian.',
-          moduleStage: 'Tahap 2',
-        },
+        component: () => import('@/pages/CategoriesPage.vue'),
+        meta: { title: 'Kategori' },
       },
       {
         path: 'pelanggan',

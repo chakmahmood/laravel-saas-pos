@@ -8,6 +8,23 @@ export type BusinessType =
 
 export type StoreRole = 'owner' | 'admin' | 'cashier'
 
+/** Universal catalog item type (mirrors `App\Enums\ItemType`). */
+export type ItemType = 'product' | 'service' | 'menu' | 'package'
+
+export const ITEM_TYPE_LABELS: Record<ItemType, string> = {
+  product: 'Produk',
+  service: 'Jasa',
+  menu: 'Menu',
+  package: 'Paket',
+}
+
+export const ITEM_TYPE_VALUES: ItemType[] = ['product', 'service', 'menu', 'package']
+
+export function itemTypeLabel(type: ItemType | null | undefined): string {
+  return type ? ITEM_TYPE_LABELS[type] : '—'
+}
+
+
 export const BUSINESS_TYPE_LABELS: Record<BusinessType, string> = {
   retail: 'Retail / Toko',
   restaurant: 'Kafe & Restoran',

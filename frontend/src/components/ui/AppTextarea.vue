@@ -5,18 +5,16 @@ const props = withDefaults(
   defineProps<{
     modelValue: string
     label?: string
-    type?: string
     name?: string
     placeholder?: string
-    autocomplete?: string
-    inputmode?: 'text' | 'email' | 'numeric' | 'decimal' | 'tel' | 'url' | 'search'
+    rows?: number
     maxlength?: number
     error?: string
     hint?: string
     required?: boolean
     disabled?: boolean
   }>(),
-  { type: 'text', required: false, disabled: false },
+  { rows: 3, required: false, disabled: false },
 )
 
 const emit = defineEmits<{ (event: 'update:modelValue', value: string): void }>()
@@ -34,7 +32,7 @@ const describedBy = computed(() => {
 })
 
 function onInput(event: Event): void {
-  emit('update:modelValue', (event.target as HTMLInputElement).value)
+  emit('update:modelValue', (event.target as HTMLTextAreaElement).value)
 }
 </script>
 
@@ -44,20 +42,18 @@ function onInput(event: Event): void {
       {{ label }}
       <span v-if="required" class="text-rose-400" aria-hidden="true">*</span>
     </label>
-    <input
+    <textarea
       :id="inputId"
       :name="name"
-      :type="type"
       :value="modelValue"
       :placeholder="placeholder"
-      :autocomplete="autocomplete"
-      :inputmode="inputmode"
+      :rows="rows"
       :maxlength="maxlength"
       :disabled="disabled"
       :required="required"
       :aria-invalid="error ? 'true' : undefined"
       :aria-describedby="describedBy"
-      class="h-10 w-full rounded-lg border bg-panel-2 px-3 text-sm text-slate-100 transition-colors placeholder:text-slate-500 focus:border-brand-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+      class="w-full resize-y rounded-lg border bg-panel-2 px-3 py-2 text-sm text-slate-100 transition-colors placeholder:text-slate-500 focus:border-brand-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
       :class="error ? 'border-rose-500/70' : 'border-hairline hover:border-hairline-strong'"
       @input="onInput"
     />

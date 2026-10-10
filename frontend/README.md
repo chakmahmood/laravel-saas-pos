@@ -102,13 +102,17 @@ src/
   assets/       # Tailwind + CSS tema
   components/
     layout/     # AppSidebar, AppTopbar, AppBreadcrumb
-    ui/         # Button, Input, Password, Select, Card, Badge, Dropdown,
-                # Skeleton, EmptyState, ErrorState, Toast, Spinner, Icon
+    ui/         # Button, Input, PasswordInput, Select, Textarea, CurrencyInput,
+                # Card, Badge, Checkbox, Dropdown, Modal, ConfirmDialog,
+                # Pagination, Skeleton, EmptyState, ErrorState, Toast, Spinner, Icon
   features/
     auth/       # LoginForm, RegisterForm
+    products/   # api, types, ProductFormModal
+    categories/ # api, types, CategoryFormModal
   layouts/      # AdminLayout, AuthLayout
-  lib/          # env, http, errors, token, format
-  pages/        # Login, Register, StoreSelect, Dashboard, ModulePlaceholder, 404
+  lib/          # env, http, errors, token, format, debounce, query
+  pages/        # Login, Register, StoreSelect, Dashboard, Products, Categories,
+                # ModulePlaceholder, 404
   router/       # routes, guards
   services/     # pemanggilan API (session)
   stores/       # Pinia: auth, currentStore, toast
@@ -123,11 +127,31 @@ src/
 | `/register` | register | publik (guest only) |
 | `/select-store` | select-store | butuh autentikasi |
 | `/dashboard` | dashboard | autentikasi + current store |
-| `/produk`, `/kategori`, `/pelanggan`, `/transaksi`, `/pembayaran`, `/sesi-kas`, `/inventory`, `/pengaturan` | modul | placeholder "tersedia pada tahap berikutnya" |
+| `/produk` | products | tersedia — daftar/tambah/ubah/hapus produk |
+| `/kategori` | categories | tersedia — daftar/tambah/ubah/hapus kategori |
+| `/pelanggan`, `/transaksi`, `/pembayaran`, `/sesi-kas`, `/inventory`, `/pengaturan` | modul | placeholder "tersedia pada tahap berikutnya" |
 
 Menu Inventory hanya tampil untuk store yang mendukung inventory (retail,
 restoran). Penyembunyian menu **bukan** kontrol keamanan; backend tetap
 memverifikasi.
+
+## Modul tersedia
+
+### Produk (`/produk`)
+- Daftar dengan pencarian (nama/SKU/barcode), filter tipe, kategori, status, dan
+  pagination server-side.
+- Tambah/ubah melalui modal; hapus dengan konfirmasi.
+- Field sesuai kontrak backend: nama, tipe, kategori, satuan, harga jual, harga
+  pokok (opsional), SKU, barcode, deskripsi, aktif, dan `tracks_stock` (hanya
+  untuk store inventory).
+- Harga diinput/ditampilkan sebagai rupiah (`Rp10.000`) tetapi dikirim sebagai
+  integer (`10000`).
+
+### Kategori (`/kategori`)
+- Daftar dengan pencarian + filter status + pagination.
+- Tambah/ubah melalui modal; hapus dengan konfirmasi.
+- Menghapus kategori yang masih dipakai produk ditolak backend → 409
+  `category_in_use` ditampilkan sebagai notifikasi, bukan daftar kosong.
 
 ## CORS / Sanctum (integrasi)
 
@@ -139,11 +163,12 @@ Untuk mengembangkan dari `http://localhost:5173` ke API Laravel:
    tidak wajib. Bila beralih ke cookie SPA, konfigurasi tersebut diperlukan.
 3. Backend endpoint mengembalikan JSON; kirim header `Accept: application/json`.
 
-## Belum termasuk (Checkpoint 1)
+## Belum termasuk (setelah FE Checkpoint 2)
 
-- CRUD produk/kategori/pelanggan, transaksi, pembayaran, sesi kas, inventory.
+- CRUD pelanggan, transaksi, pembayaran, sesi kas, inventory.
 - Modul laporan/analitik (endpoint backend belum tersedia).
 - Area Super Admin platform (backend belum mendukung).
+- Manajemen tim/membership (endpoint backend belum tersedia).
 - Mode terang (light theme) — fokus pada satu dark theme premium.
 
 ## Dokumentasi terkait

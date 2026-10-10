@@ -42,3 +42,25 @@ export function formatQuantity(value: string | null | undefined): string {
   }
   return new Intl.NumberFormat('id-ID', { maximumFractionDigits: 3 }).format(parsed)
 }
+
+/**
+ * Parse a user-typed currency value into an integer minor unit (IDR rupiah).
+ * Only digits are kept, so "Rp 10.000", "10.000", and "10000" all become 10000.
+ * An empty / non-numeric input yields null.
+ */
+export function parseCurrencyInput(raw: string): number | null {
+  const digits = raw.replace(/[^\d]/g, '')
+  if (digits === '') {
+    return null
+  }
+  const value = Number.parseInt(digits, 10)
+  return Number.isFinite(value) ? value : null
+}
+
+/** Format an integer minor unit for an editable currency input (no "Rp" prefix). */
+export function formatCurrencyInput(value: number | null | undefined): string {
+  if (value === null || value === undefined) {
+    return ''
+  }
+  return new Intl.NumberFormat('id-ID').format(value)
+}

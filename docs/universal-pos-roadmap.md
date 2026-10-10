@@ -217,9 +217,16 @@ Pinia + Vue Router). Tidak mengganggu struktur Laravel.
       pemilihan toko, route guard, layout admin (sidebar/topbar/breadcrumb),
       dashboard shell yang jujur (tanpa angka palsu), komponen UI reusable.
       Typecheck, lint, 22 unit/component test, dan production build lulus.
-- [ ] **FE Checkpoint berikutnya:** modul CRUD Produk/Kategori/Pelanggan,
-      lalu Transaksi/Pembayaran/Sesi Kas, disusul Inventory.
+- [x] **FE Checkpoint 2 (Produk & Kategori):** modul Produk (list/search/filter/
+      pagination + create/update/delete) dan Kategori (list/search/filter/
+      pagination + create/update/delete), terhubung ke endpoint aktual; harga
+      rupiah integer; `tracks_stock` mengikuti capability store; penanganan 409
+      (histori stok / kategori dipakai) dan 422 per-field. Typecheck, lint,
+      **60 test**, dan production build lulus.
+- [ ] **FE Checkpoint berikutnya:** modul Pelanggan, lalu Transaksi/Pembayaran/
+      Sesi Kas, disusul Inventory.
 - [ ] Area Super Admin platform (menunggu dukungan backend).
+- [ ] Manajemen tim/membership (menunggu dukungan backend).
 - [ ] Endpoint analitik/laporan untuk dashboard (menunggu backend).
 
 Lihat `frontend/README.md` dan `docs/api/frontend-integration-guide.md`.
