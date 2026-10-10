@@ -16,7 +16,11 @@ const store = useCurrentStoreStore()
 const sections = computed(() =>
   NAV_SECTIONS.map((section) => ({
     label: section.label,
-    items: section.items.filter((item) => !item.inventoryOnly || store.inventoryEnabled),
+    items: section.items.filter(
+      (item) =>
+        (!item.inventoryOnly || store.inventoryEnabled) &&
+        (!item.managerOnly || store.canManage),
+    ),
   })).filter((section) => section.items.length > 0),
 )
 </script>

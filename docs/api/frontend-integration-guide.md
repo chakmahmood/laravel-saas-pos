@@ -1,8 +1,8 @@
 # Frontend Integration Guide
 
-> Checkpoint 6. Panduan integrasi FE Admin Panel dengan backend Universal POS.
-> Spesifikasi lengkap: `docs/api/openapi.yaml`. Endpoint & payload di sini
-> mengikuti implementasi aktual (51 operasi).
+> Checkpoint 7 (Team Management). Panduan integrasi FE Admin Panel dengan backend
+> Universal POS. Spesifikasi lengkap: `docs/api/openapi.yaml`. Endpoint & payload
+> di sini mengikuti implementasi aktual (58 operasi).
 
 ## 1. Base URL & prefix
 
@@ -17,9 +17,21 @@
    membership `owner`, langganan Free, dan token. `business_type` opsional.
 2. **Login** `POST /api/auth/login` — mengembalikan token baru.
 3. **Logout** `POST /api/auth/logout` — mencabut token yang sedang dipakai.
+4. **Ganti kata sandi** `POST /api/auth/change-password`
+   `{ current_password, password, password_confirmation }`. Dipakai juga oleh
+   akun karyawan yang dibuat owner/admin untuk mengganti kata sandi awal.
 
 Endpoint `register` dan `login` **rate-limited** (per-IP 30/menit, per
 email+IP 5/menit). Pelanggaran → `429` `{ message, code: "too_many_requests" }`.
+
+### Kata sandi awal (akun karyawan)
+Akun admin/kasir yang dibuat owner/admin mendapat kata sandi awal dari pembuat
+akun dan ditandai `must_change_password = true`. Selama flag ini aktif, seluruh
+endpoint bisnis (di bawah konteks store) menolak dengan `403`
+`password_change_required`. Yang tetap dapat diakses: `login`, `/api/me`,
+`/api/current-store`, `logout`, dan `POST /api/auth/change-password`. Setelah
+ganti kata sandi berhasil, flag dibersihkan dan POS dapat dipakai. Akun owner
+hasil registrasi **tidak** dipaksa ganti kata sandi.
 
 ### Menggunakan token
 Kirim header pada setiap request terproteksi:
@@ -75,9 +87,9 @@ Semua error JSON berisi `message` dan `code` (kecuali 5xx yang bersifat generik)
 | Status | `code` (contoh) | Arti |
 |--------|-----------------|------|
 | 401 | `unauthenticated`, `token_required` | Perlu login / token API dengan konteks toko |
-| 403 | `forbidden`, `inventory_not_available`, `store_not_accessible` | Tidak diizinkan / capability / store |
+| 403 | `forbidden`, `inventory_not_available`, `store_not_accessible`, `password_change_required` | Tidak diizinkan / capability / store / wajib ganti kata sandi |
 | 404 | `not_found` | Resource tidak ada pada tenant aktif |
-| 409 | `current_store_not_selected`, `current_store_unavailable`, `category_in_use`, `insufficient_stock`, `opening_stock_conflict`, `idempotency_conflict`, `adjustment_below_reserved`, `inventory_item_not_tracked`, `item_has_stock_history`, `item_inventory_in_use`, `default_stock_location_protected`, `stock_location_in_use`, `cash_session_already_open`, `cash_session_already_closed`, `cash_session_required`, `cash_session_closed`, `order_cancelled`, `payment_already_voided`, `inventory_not_supported`, `stock_location_unavailable`, `stock_invalid_quantity`, `stock_inconsistent`, `stock_tenant_mismatch` | Konflik state bisnis |
+| 409 | `current_store_not_selected`, `current_store_unavailable`, `email_already_registered`, `admin_limit_reached`, `owner_protected`, `category_in_use`, `insufficient_stock`, `opening_stock_conflict`, `idempotency_conflict`, `adjustment_below_reserved`, `inventory_item_not_tracked`, `item_has_stock_history`, `item_inventory_in_use`, `default_stock_location_protected`, `stock_location_in_use`, `cash_session_already_open`, `cash_session_already_closed`, `cash_session_required`, `cash_session_closed`, `order_cancelled`, `payment_already_voided`, `inventory_not_supported`, `stock_location_unavailable`, `stock_invalid_quantity`, `stock_inconsistent`, `stock_tenant_mismatch` | Konflik state bisnis |
 | 422 | `validation_error` | Validasi gagal; lihat `errors` |
 | 429 | `too_many_requests` | Rate limit |
 | 5xx | - | Error server (generik) |
@@ -128,6 +140,7 @@ per endpoint.
   reservation, reservation_release, reversal
 - `BusinessType`: retail, restaurant, laundry, repair, salon, other
 - `StoreRole`: owner, admin, cashier
+- `MembershipStatus`: active, inactive
 
 ## 8. Idempotency (inventory stock-in)
 
@@ -171,18 +184,30 @@ Jangan mengandalkannya untuk idempotensi pembayaran di FE.
 | Inventory: read (locations/balances/movements) | ✓ | ✓ | ✓ | ✗ | ✗ |
 | Inventory: manage locations | ✓ | ✓ | ✗ | ✗ | ✗ |
 | Inventory: opening/receipt/adjustment | ✓ | ✓ | ✗ | ✗ | ✗ |
+| Team: lihat daftar/detail anggota | ✓ | ✓ | ✗ | ✗ | n/a |
+| Team: buat akun admin | ✓ (1 slot) | ✗ | ✗ | ✗ | n/a |
+| Team: buat akun kasir | ✓ | ✓ | ✗ | ✗ | n/a |
+| Team: ubah role (admin<->cashier) | ✓ | ✗ | ✗ | ✗ | n/a |
+| Team: aktif/nonaktifkan admin | ✓ | ✗ | ✗ | ✗ | n/a |
+| Team: aktif/nonaktifkan kasir | ✓ | ✓ | ✗ | ✗ | n/a |
+| Team: ubah owner | ✗ | ✗ | ✗ | ✗ | n/a |
 
 Catatan:
 - Tidak ada role **super-admin platform**. Semua role per-store. FE jangan
   mengasumsikan akses lintas store.
+- **Owner memakai satu akun.** Owner sudah mencakup fungsi admin dan kasir;
+  jangan minta owner membuat akun tambahan untuk memakai fitur admin/kasir, dan
+  jangan mengubah role owner menjadi `admin`/`cashier`.
+- **Maksimal satu admin aktif per toko.** Slot admin dihitung dari membership
+  `admin` yang `is_active = true`; menonaktifkan admin membebaskan slot.
 - FE bukan lapisan keamanan: backend memverifikasi permission setiap request.
-  Sembunyikan aksi berdasarkan role, tetapi tetap tangani `403`.
+  Sembunyikan aksi berdasarkan role, tetapi tetap tangani `403`/`409`.
 
 ## 10. Ringkasan endpoint
 
 Lihat `docs/api/openapi.yaml` untuk detail. Kelompok:
 Auth, Current store, Categories, Items, Customers, Orders, Payments,
-Cash sessions, Inventory. Total **51 operasi** (lihat lampiran di
+Cash sessions, Inventory, Team. Total **58 operasi** (lihat lampiran di
 `docs/backend-readiness-audit.md`).
 
 ### Belum tersedia (jangan diintegrasikan)
@@ -190,9 +215,45 @@ Cash sessions, Inventory. Total **51 operasi** (lihat lampiran di
 - Transfer stok, retur, purchase order, supplier, multi-satuan, BOM.
 - Delete/arsip store.
 - Laporan penjualan.
+- Transfer kepemilikan toko (owner tidak berubah via endpoint anggota biasa).
 
 ## 11. Catatan store nonaktif
 
 Saat ini store nonaktif tidak dapat diakses sama sekali (termasuk baca) — lihat
 `docs/store-lifecycle.md` §5 untuk keputusan yang masih tertunda mengenai akses
 baca histori store nonaktif.
+
+## 12. Team Management (owner/admin)
+
+Akun karyawan dibuat **langsung** (tanpa undangan email). Role ditetapkan
+server-side; client **tidak** mengirim `role` atau `store_id`.
+
+| Aksi | Endpoint | Peran |
+|------|----------|-------|
+| Daftar anggota | `GET /api/current-store/members` | owner, admin |
+| Detail anggota | `GET /api/current-store/members/{member}` | owner, admin |
+| Buat admin | `POST /api/current-store/members/admin` | owner (maks 1 aktif) |
+| Buat kasir | `POST /api/current-store/members/cashiers` | owner, admin |
+| Ubah role | `PATCH /api/current-store/members/{member}/role` `{ "role": "admin"|"cashier" }` | owner |
+| Aktif/nonaktif | `PATCH /api/current-store/members/{member}/status` `{ "is_active": true|false }` | owner (semua), admin (kasir saja) |
+
+Payload pembuatan akun:
+```json
+{ "name": "...", "email": "...",
+  "password": "...", "password_confirmation": "..." }
+```
+
+Aturan:
+- `{member}` adalah **id membership** (`store_user.id`) pada store aktif; id
+  tenant lain → `404`.
+- Email global yang sudah terpakai → `409` `email_already_registered` (tidak
+  membuat akun/membership baru, tidak mengubah akun existing).
+- Admin aktif kedua → `409` `admin_limit_reached`. Owner tidak dihitung admin;
+  menonaktifkan admin membebaskan slot.
+- Mengubah/menonaktifkan owner → `409` `owner_protected`.
+- Admin tidak bisa membuat admin, mengubah role, atau mengelola admin/owner.
+- Akun baru dibuat atomik (user + membership) dengan `must_change_password`
+  `true`; lihat §2.
+- Nonaktifkan membership (bukan hapus) untuk mencabut akses; token lama langsung
+  tidak dapat memakai store tersebut (`409` `current_store_unavailable`, lihat
+  §3 dan `docs/tenant-isolation.md`).

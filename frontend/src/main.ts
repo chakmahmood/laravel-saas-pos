@@ -2,7 +2,7 @@ import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import App from './App.vue'
 import router from './router'
-import { setUnauthorizedHandler } from './lib/http'
+import { setPasswordChangeRequiredHandler, setUnauthorizedHandler } from './lib/http'
 import { useAuthStore } from './stores/auth'
 import { useCurrentStoreStore } from './stores/currentStore'
 import './assets/main.css'
@@ -29,6 +29,21 @@ setUnauthorizedHandler(() => {
       name: 'login',
       query: current.fullPath !== '/' ? { redirect: current.fullPath } : undefined,
     })
+  }
+})
+
+/*
+ * A business endpoint refused with `403 password_change_required` means the
+ * account still uses the initial password set by its owner/admin. Keep the
+ * session, flag it, and send the user to the forced-change page. The route
+ * guard prevents navigation back into business pages until it is resolved.
+ */
+setPasswordChangeRequiredHandler(() => {
+  const auth = useAuthStore()
+  auth.setMustChangePassword(true)
+
+  if (router.currentRoute.value.name !== 'change-password') {
+    void router.replace({ name: 'change-password' })
   }
 })
 

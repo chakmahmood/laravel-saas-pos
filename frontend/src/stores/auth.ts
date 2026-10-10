@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { tokenStorage } from '@/lib/token'
 import { sessionService } from '@/services/session'
-import type { AuthUser, RegisterPayload } from '@/types/models'
+import type { AuthUser, ChangePasswordPayload, RegisterPayload } from '@/types/models'
 
 /**
  * Authentication state: the bearer token plus the authenticated user.
@@ -13,6 +13,13 @@ export const useAuthStore = defineStore('auth', () => {
   const user = ref<AuthUser | null>(null)
   const bootstrapped = ref(false)
   const loading = ref(false)
+
+  /**
+   * Set when the backend refuses a business endpoint with
+   * `403 password_change_required`. It is never derived from token contents,
+   * only from the actual API response.
+   */
+  const mustChangePassword = ref(false)
 
   const isAuthenticated = computed(() => token.value !== null)
 
@@ -29,12 +36,17 @@ export const useAuthStore = defineStore('auth', () => {
     user.value = value
   }
 
+  function setMustChangePassword(value: boolean): void {
+    mustChangePassword.value = value
+  }
+
   async function login(email: string, password: string): Promise<void> {
     loading.value = true
     try {
       const result = await sessionService.login(email, password)
       setToken(result.token)
       user.value = result.user
+      mustChangePassword.value = false
       bootstrapped.value = true
     } finally {
       loading.value = false
@@ -47,10 +59,20 @@ export const useAuthStore = defineStore('auth', () => {
       const result = await sessionService.register(payload)
       setToken(result.token)
       user.value = result.user
+      mustChangePassword.value = false
       bootstrapped.value = true
     } finally {
       loading.value = false
     }
+  }
+
+  /**
+   * Rotate the current user's password. On success the forced-change flag is
+   * cleared locally to match the backend.
+   */
+  async function changePassword(payload: ChangePasswordPayload): Promise<void> {
+    await sessionService.changePassword(payload)
+    mustChangePassword.value = false
   }
 
   async function fetchMe(): Promise<AuthUser | null> {
@@ -98,6 +120,7 @@ export const useAuthStore = defineStore('auth', () => {
   function clear(): void {
     setToken(null)
     user.value = null
+    mustChangePassword.value = false
     bootstrapped.value = true
   }
 
@@ -106,11 +129,14 @@ export const useAuthStore = defineStore('auth', () => {
     user,
     bootstrapped,
     loading,
+    mustChangePassword,
     isAuthenticated,
     setToken,
     setUser,
+    setMustChangePassword,
     login,
     register,
+    changePassword,
     fetchMe,
     bootstrap,
     logout,

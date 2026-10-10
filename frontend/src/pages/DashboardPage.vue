@@ -17,6 +17,7 @@ const modules = computed(() =>
   NAV_SECTIONS.flatMap((section) => section.items)
     .filter((item) => item.name !== 'dashboard')
     .filter((item) => !item.inventoryOnly || store.inventoryEnabled)
+    .filter((item) => !item.managerOnly || store.canManage)
     .map((item) => {
       const meta = router.resolve({ name: item.name }).meta
       return {

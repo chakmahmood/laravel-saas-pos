@@ -20,7 +20,13 @@ export const routes: RouteRecordRaw[] = [
     path: '/select-store',
     name: 'select-store',
     component: () => import('@/pages/StoreSelectPage.vue'),
-    meta: { title: 'Pilih Toko', requiresAuth: true },
+    meta: { title: 'Pilih Toko', requiresAuth: true, passwordExempt: true },
+  },
+  {
+    path: '/ganti-password',
+    name: 'change-password',
+    component: () => import('@/pages/ChangePasswordPage.vue'),
+    meta: { title: 'Ganti Password', requiresAuth: true, passwordExempt: true },
   },
   {
     path: '/',
@@ -111,6 +117,12 @@ export const routes: RouteRecordRaw[] = [
           moduleDescription: 'Profil toko dan preferensi operasional.',
           moduleStage: 'Tahap 2',
         },
+      },
+      {
+        path: 'tim',
+        name: 'team',
+        component: () => import('@/pages/TeamPage.vue'),
+        meta: { title: 'Tim', requiresManager: true },
       },
     ],
   },

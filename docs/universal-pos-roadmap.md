@@ -205,6 +205,31 @@ Detail desain: `docs/inventory-design.md`; API: `docs/inventory-api.md`.
 - [ ] Laporan harian/periode, per metode pembayaran, per kasir.
 - [ ] (Laporan stok menyusul setelah integrasi inventory.)
 
+### Phase 3D — Team Management (Backend Checkpoint 7)
+
+**Selesai.** Pembuatan akun karyawan **langsung** (tanpa undangan email),
+batas satu admin aktif, hak owner atas fungsi admin/kasir, dan force-change
+password awal.
+
+- [x] Migrasi aditif `users.must_change_password` (belum dijalankan).
+- [x] Model `StoreMember` (pivot `store_user`), enum `MembershipStatus`, factory.
+- [x] `StoreMemberPolicy` (owner/admin/cashier) + `StoreMemberService`
+      (buat admin/kasir, ubah role, aktif/nonaktif) dengan lock baris store.
+- [x] Aturan **maksimal satu admin aktif per toko** (`409 admin_limit_reached`);
+      admin nonaktif tidak memegang slot; owner bukan admin.
+- [x] **Proteksi owner** dari demote/nonaktif via endpoint anggota (`owner_protected`).
+- [x] Endpoint `GET/POST /api/current-store/members[/admin|/cashiers]`,
+      `PATCH .../{member}/role`, `PATCH .../{member}/status`, `GET .../{member}`.
+- [x] `POST /api/auth/change-password` + middleware `password.changed`
+      (`403 password_change_required`) untuk akun karyawan baru.
+- [x] Pembuatan akun atomik (user + membership), `409 email_already_registered`,
+      kata sandi di-hash, tidak pernah dikembalikan/log.
+- [x] Test `TeamManagementTest` (21 test): role, batas admin, pembuatan kasir,
+      force-change password, lifecycle & isolasi tenant.
+- [x] Dokumentasi OpenAPI (58 operasi), FE guide, arsitektur & roadmap.
+- [ ] Migrasi `must_change_password` belum diterapkan ke DB development
+      (menunggu persetujuan).
+
 ---
 
 ## Frontend Admin Panel (jalur paralel)
@@ -226,7 +251,8 @@ Pinia + Vue Router). Tidak mengganggu struktur Laravel.
 - [ ] **FE Checkpoint berikutnya:** modul Pelanggan, lalu Transaksi/Pembayaran/
       Sesi Kas, disusul Inventory.
 - [ ] Area Super Admin platform (menunggu dukungan backend).
-- [ ] Manajemen tim/membership (menunggu dukungan backend).
+- [ ] Manajemen tim/membership (backend siap: Phase 3D / Backend Checkpoint 7;
+      FE menyusul).
 - [ ] Endpoint analitik/laporan untuk dashboard (menunggu backend).
 
 Lihat `frontend/README.md` dan `docs/api/frontend-integration-guide.md`.
@@ -267,7 +293,8 @@ Dibangun **di atas** `items`/`orders`/`customers`. Pilih sesuai kebutuhan.
 
 ## Backlog Lintas Fase
 
-- [ ] Policies granular per role (owner/admin/cashier) + matriks final.
+- [x] Policies granular per role (owner/admin/cashier) + matriks final
+      (Phase 3D / Backend Checkpoint 7).
 - [ ] Model akun (`accounts`) & penegakan `max_stores`.
 - [ ] `store_settings` / konfigurasi operasional.
 - [ ] Kuota varian/`max_products` lanjutan.

@@ -599,22 +599,42 @@ Implementasi existing dipertahankan penuh (lihat juga `docs/tenant-isolation.md`
 
 ### 9.3 Role & Policy
 
-- Role saat ini **string** pada pivot (`owner`/`admin`/`cashier`); belum ada
-  permission granular. Role string **bukan** sistem permission lengkap.
-- **Rencana Phase 2+:** perkenalkan Laravel Policies (mis. `ItemPolicy`,
-  `OrderPolicy`, `StorePolicy`) yang membaca `current_store_role` dan
-  `business_type`. Gate sederhana (`Gate::define`) cukup untuk fase awal.
-- **Tidak** menambah Spatie Permission tanpa kebutuhan teknis yang terbukti.
+- Role adalah **string** pada pivot `store_user` (`owner`/`admin`/`cashier`),
+  di-cast ke `App\Enums\StoreRole`. Tidak ada permission granular; ini bukan
+  sistem permission lengkap.
+- Otorisasi memakai **Laravel Policies** (`CategoryPolicy`, `ItemPolicy`,
+  `OrderPolicy`, `CashSessionPolicy`, `StockMovementPolicy`, `StoreMemberPolicy`,
+  dll.) yang membaca `current_store_role` dan `current_store` dari request
+  attributes (di-set `current.store`).
+- **Tidak** memakai Spatie Permission.
+- `StoreMemberPolicy` mengatur pengelolaan anggota; invariant bisnis (satu admin
+  aktif, proteksi owner) ditegakkan di `StoreMemberService` sebagai konflik
+  domain `409`.
 
-Matriks kapabilitas (rencana, butuh persetujuan) — contoh awal:
+Matriks kapabilitas aktual:
 
 | Aksi | owner | admin | cashier |
 |------|:---:|:---:|:---:|
-| Kelola store & membership | ya | sebagian | tidak |
 | Kelola kategori & item | ya | ya | tidak |
 | Buat order & pembayaran | ya | ya | ya |
-| Refund / void | ya | ya | tidak (butuh approval) |
-| Laporan | ya | ya | terbatas |
+| Buka shift / catat movement | shift sendiri | shift sendiri | shift sendiri |
+| Void / adjustment / opening stock | ya | ya | tidak |
+| Lihat daftar anggota | ya | ya | tidak |
+| Buat akun admin | ya (1 slot) | tidak | tidak |
+| Buat akun kasir | ya | ya | tidak |
+| Ubah role anggota | ya | tidak | tidak |
+| Aktif/nonaktifkan admin | ya | tidak | tidak |
+| Aktif/nonaktifkan kasir | ya | ya | tidak |
+
+Catatan:
+- **Owner memakai satu akun** dan sudah mencakup fungsi admin + kasir; tidak ada
+  duplikasi akun/membership owner.
+- **Maksimal satu membership admin aktif per toko** (owner bukan admin). Slot
+  bebas ketika admin dinonaktifkan; invariant dijaga dengan mengunci baris
+  `stores` (`lockForUpdate`) sebelum menghitung, karena tidak ada unique
+  constraint kondisional yang portabel MySQL/SQLite (lihat §10.4).
+- Membership `owner` tidak dapat diubah/dinonaktifkan lewat endpoint anggota
+  biasa (`409 owner_protected`).
 
 ### 9.4 Tanpa global scope (keputusan)
 

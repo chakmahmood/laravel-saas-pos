@@ -4,6 +4,7 @@ import { tokenStorage } from './token'
 import { toApiError } from './errors'
 
 let unauthorizedHandler: (() => void) | null = null
+let passwordChangeRequiredHandler: (() => void) | null = null
 
 /**
  * Register the callback invoked when a protected request returns 401. The app
@@ -12,6 +13,15 @@ let unauthorizedHandler: (() => void) | null = null
  */
 export function setUnauthorizedHandler(handler: (() => void) | null): void {
   unauthorizedHandler = handler
+}
+
+/**
+ * Register the callback invoked when a business request is refused with
+ * `403 password_change_required`. The app wires this to route the user to the
+ * forced password-change page without logging them out.
+ */
+export function setPasswordChangeRequiredHandler(handler: (() => void) | null): void {
+  passwordChangeRequiredHandler = handler
 }
 
 function isAuthEndpoint(url: string | undefined): boolean {
@@ -43,6 +53,9 @@ function createHttpClient(): AxiosInstance {
       const url = (error as { config?: { url?: string } }).config?.url
       if (apiError.status === 401 && !isAuthEndpoint(url)) {
         unauthorizedHandler?.()
+      }
+      if (apiError.status === 403 && apiError.code === 'password_change_required') {
+        passwordChangeRequiredHandler?.()
       }
       return Promise.reject(apiError)
     },

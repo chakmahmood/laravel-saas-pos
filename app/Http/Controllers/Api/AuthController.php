@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Enums\BusinessType;
 use App\Enums\StoreRole;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Auth\ChangePasswordRequest;
 use App\Models\Plan;
 use App\Models\Store;
 use App\Models\Subscription;
@@ -287,6 +288,35 @@ class AuthController extends Controller
 
         return response()->json([
             'message' => 'Logout berhasil.',
+        ]);
+    }
+
+    /**
+     * Change the authenticated user's own password.
+     *
+     * Also clears the `must_change_password` flag so an employee who was forced
+     * to rotate the initial password can use the POS afterwards.
+     */
+    public function changePassword(ChangePasswordRequest $request): JsonResponse
+    {
+        $user = $request->user();
+
+        if (! Hash::check((string) $request->input('current_password'), $user->password)) {
+            throw ValidationException::withMessages([
+                'current_password' => ['Kata sandi saat ini tidak cocok.'],
+            ]);
+        }
+
+        $user->forceFill([
+            'password' => (string) $request->input('password'),
+            'must_change_password' => false,
+        ])->save();
+
+        return response()->json([
+            'message' => 'Kata sandi berhasil diubah.',
+            'data' => [
+                'must_change_password' => false,
+            ],
         ]);
     }
 }

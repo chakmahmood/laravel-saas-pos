@@ -44,4 +44,49 @@ describe('resolveNavigation', () => {
   it('allows guest-only routes for guests', () => {
     expect(resolveNavigation({ guestOnly: true }, guest)).toEqual({ type: 'allow' })
   })
+
+  it('redirects a forced password change away from business pages', () => {
+    expect(
+      resolveNavigation(
+        { requiresAuth: true, requiresStore: true },
+        { ...authenticated, mustChangePassword: true },
+      ),
+    ).toEqual({ type: 'redirect', name: 'change-password' })
+  })
+
+  it('allows password-exempt routes while a change is pending (no redirect loop)', () => {
+    expect(
+      resolveNavigation(
+        { requiresAuth: true, passwordExempt: true },
+        { ...authenticated, mustChangePassword: true },
+      ),
+    ).toEqual({ type: 'allow' })
+  })
+
+  it('redirects non-managers away from manager-only routes', () => {
+    expect(
+      resolveNavigation(
+        { requiresAuth: true, requiresStore: true, requiresManager: true },
+        { ...authenticated, isManager: false },
+      ),
+    ).toEqual({ type: 'redirect', name: 'dashboard' })
+  })
+
+  it('allows managers into manager-only routes', () => {
+    expect(
+      resolveNavigation(
+        { requiresAuth: true, requiresStore: true, requiresManager: true },
+        { ...authenticated, isManager: true },
+      ),
+    ).toEqual({ type: 'allow' })
+  })
+
+  it('prioritizes the forced password change over the manager check', () => {
+    expect(
+      resolveNavigation(
+        { requiresAuth: true, requiresStore: true, requiresManager: true },
+        { ...authenticated, isManager: false, mustChangePassword: true },
+      ),
+    ).toEqual({ type: 'redirect', name: 'change-password' })
+  })
 })

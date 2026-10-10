@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Universal POS SaaS API
-  version: "0.2.0"
+  version: "0.3.0"
   description: |
     API backend Universal POS SaaS (Laravel 13 + Sanctum), multi-tenant per
     store. Semua endpoint bisnis memerlukan token Bearer dan konteks store aktif.
@@ -27,6 +27,7 @@ tags:
   - name: Payments
   - name: Cash sessions
   - name: Inventory
+  - name: Team
 components:
   securitySchemes:
     bearerAuth:
@@ -364,6 +365,28 @@ components:
     StoreRole:
       type: string
       enum: [owner, admin, cashier]
+    MembershipStatus:
+      type: string
+      enum: [active, inactive]
+    StoreMember:
+      type: object
+      properties:
+        id: { type: integer }
+        user_id: { type: integer }
+        name: { type: string }
+        email: { type: string, format: email }
+        role: { $ref: '#/components/schemas/StoreRole' }
+        status: { $ref: '#/components/schemas/MembershipStatus' }
+        is_active: { type: boolean }
+        must_change_password: { type: boolean, description: "true = akun baru wajib ganti kata sandi sebelum memakai POS." }
+        joined_at: { type: [string, "null"], format: date-time }
+        updated_at: { type: [string, "null"], format: date-time }
+    PaginatedStoreMembers:
+      type: object
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/StoreMember' } }
+        links: { type: object }
+        meta: { $ref: '#/components/schemas/PaginationMeta' }
 paths:
   /auth/register:
     post:
@@ -1376,6 +1399,224 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409':
           description: adjustment_below_reserved / idempotency_conflict / inventory_item_not_tracked / stock_invalid_quantity / stock_inconsistent.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /auth/change-password:
+    post:
+      tags: [Auth]
+      summary: Ganti kata sandi user yang sedang login (membersihkan must_change_password)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current_password, password, password_confirmation]
+              properties:
+                current_password: { type: string }
+                password: { type: string, minLength: 8 }
+                password_confirmation: { type: string }
+      responses:
+        '200':
+          description: Kata sandi diubah.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+                  data:
+                    type: object
+                    properties:
+                      must_change_password: { type: boolean, enum: [false] }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /current-store/members:
+    get:
+      tags: [Team]
+      summary: Daftar anggota toko aktif (owner & admin)
+      parameters:
+        - { name: search, in: query, required: false, schema: { type: string, maxLength: 100 } }
+        - { name: role, in: query, required: false, schema: { $ref: '#/components/schemas/StoreRole' } }
+        - { name: status, in: query, required: false, schema: { $ref: '#/components/schemas/MembershipStatus' } }
+        - $ref: '#/components/parameters/PerPage'
+        - $ref: '#/components/parameters/Page'
+        - { name: sort, in: query, required: false, schema: { type: string, enum: [created_at, role] } }
+        - $ref: '#/components/parameters/Direction'
+      responses:
+        '200':
+          description: Daftar anggota terpaginasikan.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaginatedStoreMembers' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: password_change_required / current_store_unavailable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /current-store/members/admin:
+    post:
+      tags: [Team]
+      summary: Buat akun admin (owner; maksimal satu admin aktif per toko)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, password, password_confirmation]
+              properties:
+                name: { type: string, maxLength: 100 }
+                email: { type: string, format: email, maxLength: 255 }
+                password: { type: string, minLength: 8 }
+                password_confirmation: { type: string }
+      responses:
+        '201':
+          description: Admin dibuat; akun wajib ganti kata sandi.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+                  data: { $ref: '#/components/schemas/StoreMember' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: admin_limit_reached / email_already_registered.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /current-store/members/cashiers:
+    post:
+      tags: [Team]
+      summary: Buat akun kasir (owner atau admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, password, password_confirmation]
+              properties:
+                name: { type: string, maxLength: 100 }
+                email: { type: string, format: email, maxLength: 255 }
+                password: { type: string, minLength: 8 }
+                password_confirmation: { type: string }
+      responses:
+        '201':
+          description: Kasir dibuat; akun wajib ganti kata sandi.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+                  data: { $ref: '#/components/schemas/StoreMember' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: email_already_registered.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /current-store/members/{member}:
+    get:
+      tags: [Team]
+      summary: Detail anggota toko aktif (owner & admin)
+      parameters:
+        - name: member
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Detail anggota.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/StoreMember' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /current-store/members/{member}/role:
+    patch:
+      tags: [Team]
+      summary: Ubah role anggota admin <-> cashier (owner; owner tidak dapat diubah)
+      parameters:
+        - name: member
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role: { type: string, enum: [admin, cashier] }
+      responses:
+        '200':
+          description: Role diperbarui.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+                  data: { $ref: '#/components/schemas/StoreMember' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: admin_limit_reached / owner_protected.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /current-store/members/{member}/status:
+    patch:
+      tags: [Team]
+      summary: Aktifkan/nonaktifkan anggota (owner semua; admin hanya kasir)
+      parameters:
+        - name: member
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [is_active]
+              properties:
+                is_active: { type: boolean }
+      responses:
+        '200':
+          description: Status diperbarui.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+                  data: { $ref: '#/components/schemas/StoreMember' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: owner_protected / admin_limit_reached.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }

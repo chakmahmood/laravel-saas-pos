@@ -70,6 +70,14 @@ class Store extends Model
             ->withTimestamps();
     }
 
+    /**
+     * Store memberships (owner/admin/cashier) of this store.
+     */
+    public function members(): HasMany
+    {
+        return $this->hasMany(StoreMember::class);
+    }
+
     public function subscriptions(): HasMany
     {
         return $this->hasMany(Subscription::class);

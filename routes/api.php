@@ -12,6 +12,7 @@ use App\Http\Controllers\Api\StockBalanceController;
 use App\Http\Controllers\Api\StockLocationController;
 use App\Http\Controllers\Api\StockMovementController;
 use App\Http\Controllers\Api\StockMutationController;
+use App\Http\Controllers\Api\StoreMemberController;
 use App\Http\Controllers\Api\UserController;
 use App\Http\Middleware\EnsureInventoryEnabled;
 use Illuminate\Support\Facades\Route;
@@ -39,6 +40,15 @@ Route::middleware('auth:sanctum')->group(function () {
         'me',
     ]);
 
+    /*
+     * Reachable while `must_change_password` is true, so an employee can rotate
+     * the initial password set by the owner/admin.
+     */
+    Route::post('/auth/change-password', [
+        AuthController::class,
+        'changePassword',
+    ]);
+
     Route::get('/current-store', [
         CurrentStoreController::class,
         'show',
@@ -52,8 +62,9 @@ Route::middleware('auth:sanctum')->group(function () {
     /*
      * Business endpoints require a validated current store. The store is
      * resolved by the `current.store` middleware, never from request input.
+     * `password.changed` blocks them until an initial password is rotated.
      */
-    Route::middleware('current.store')->group(function () {
+    Route::middleware(['current.store', 'password.changed'])->group(function () {
         Route::get('/categories', [
             CategoryController::class,
             'index',
@@ -284,6 +295,41 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/cash-sessions/{cashSession}/movements', [
             CashSessionController::class,
             'storeMovement',
+        ]);
+
+        /*
+         * Team management. Scoped to the active store; a client never supplies
+         * the tenant. Role authorization and the one-active-admin invariant are
+         * enforced by the policy and service respectively.
+         */
+        Route::get('/current-store/members', [
+            StoreMemberController::class,
+            'index',
+        ]);
+
+        Route::post('/current-store/members/admin', [
+            StoreMemberController::class,
+            'storeAdmin',
+        ]);
+
+        Route::post('/current-store/members/cashiers', [
+            StoreMemberController::class,
+            'storeCashier',
+        ]);
+
+        Route::get('/current-store/members/{member}', [
+            StoreMemberController::class,
+            'show',
+        ]);
+
+        Route::patch('/current-store/members/{member}/role', [
+            StoreMemberController::class,
+            'updateRole',
+        ]);
+
+        Route::patch('/current-store/members/{member}/status', [
+            StoreMemberController::class,
+            'updateStatus',
         ]);
     });
 });

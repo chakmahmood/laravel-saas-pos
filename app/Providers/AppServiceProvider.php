@@ -11,6 +11,7 @@ use App\Models\Payment;
 use App\Models\StockBalance;
 use App\Models\StockLocation;
 use App\Models\StockMovement;
+use App\Models\StoreMember;
 use App\Policies\CashSessionPolicy;
 use App\Policies\CategoryPolicy;
 use App\Policies\CustomerPolicy;
@@ -20,6 +21,7 @@ use App\Policies\PaymentPolicy;
 use App\Policies\StockBalancePolicy;
 use App\Policies\StockLocationPolicy;
 use App\Policies\StockMovementPolicy;
+use App\Policies\StoreMemberPolicy;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -50,6 +52,7 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(StockLocation::class, StockLocationPolicy::class);
         Gate::policy(StockBalance::class, StockBalancePolicy::class);
         Gate::policy(StockMovement::class, StockMovementPolicy::class);
+        Gate::policy(StoreMember::class, StoreMemberPolicy::class);
 
         /*
          * Rate limiting for the public authentication endpoints (login and

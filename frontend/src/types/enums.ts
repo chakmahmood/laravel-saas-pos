@@ -54,3 +54,15 @@ export function businessTypeLabel(type: BusinessType | null | undefined): string
 export function storeRoleLabel(role: StoreRole | null | undefined): string {
   return role ? STORE_ROLE_LABELS[role] : '—'
 }
+
+/** Membership lifecycle status (mirrors `App\Enums\MembershipStatus`). */
+export type MembershipStatus = 'active' | 'inactive'
+
+export const MEMBERSHIP_STATUS_LABELS: Record<MembershipStatus, string> = {
+  active: 'Aktif',
+  inactive: 'Nonaktif',
+}
+
+export function membershipStatusLabel(status: MembershipStatus | null | undefined): string {
+  return status ? MEMBERSHIP_STATUS_LABELS[status] : '—'
+}

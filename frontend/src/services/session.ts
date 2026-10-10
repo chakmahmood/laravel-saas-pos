@@ -1,6 +1,7 @@
 import { http } from '@/lib/http'
 import type { DataEnvelope, MessageEnvelope } from '@/types/api'
 import type {
+  ChangePasswordPayload,
   CurrentStore,
   LoginResult,
   MeResult,
@@ -48,5 +49,13 @@ export const sessionService = {
       { store_id: storeId },
     )
     return response.data.data.current_store
+  },
+
+  /**
+   * Change the authenticated user's own password. Also clears the backend's
+   * `must_change_password` flag. The password is never persisted client-side.
+   */
+  async changePassword(payload: ChangePasswordPayload): Promise<void> {
+    await http.post('/auth/change-password', payload)
   },
 }

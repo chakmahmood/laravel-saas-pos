@@ -30,6 +30,8 @@ router.beforeEach(async (to) => {
   const decision = resolveNavigation(to.meta, {
     isAuthenticated: auth.isAuthenticated,
     hasStore: currentStore.hasStore,
+    isManager: currentStore.canManage,
+    mustChangePassword: auth.mustChangePassword,
   })
 
   if (decision.type === 'redirect') {

@@ -4,9 +4,10 @@ Web admin panel untuk SaaS POS Universal. Vue 3 + TypeScript + Vite + Tailwind
 CSS + Pinia + Vue Router. Terpisah dari backend Laravel (tidak mengganggu
 struktur Laravel).
 
-> Status: **FE Checkpoint 1 — Foundation**. Login, pemilihan toko, navigasi,
-> route guard, dashboard shell, dan API client sudah terhubung ke API nyata.
-> Modul bisnis (produk, transaksi, inventory, dst.) belum dibangun.
+> Status: **FE Checkpoint 3 — Team Management**. Login, pemilihan toko,
+> navigasi, route guard, dashboard shell, API client, modul Produk & Kategori,
+> serta manajemen Tim (admin/kasir) dan alur wajib ganti kata sandi sudah
+> terhubung ke API nyata. Modul lain belum dibangun.
 
 ## Stack
 
@@ -109,10 +110,11 @@ src/
     auth/       # LoginForm, RegisterForm
     products/   # api, types, ProductFormModal
     categories/ # api, types, CategoryFormModal
+    team/       # api, types, errors, MemberFormModal
   layouts/      # AdminLayout, AuthLayout
   lib/          # env, http, errors, token, format, debounce, query
-  pages/        # Login, Register, StoreSelect, Dashboard, Products, Categories,
-                # ModulePlaceholder, 404
+  pages/        # Login, Register, StoreSelect, ChangePassword, Dashboard,
+                # Products, Categories, Team, ModulePlaceholder, 404
   router/       # routes, guards
   services/     # pemanggilan API (session)
   stores/       # Pinia: auth, currentStore, toast
@@ -126,9 +128,11 @@ src/
 | `/login` | login | publik (guest only) |
 | `/register` | register | publik (guest only) |
 | `/select-store` | select-store | butuh autentikasi |
+| `/ganti-password` | change-password | autentikasi (dikecualikan dari guard wajib ganti sandi) |
 | `/dashboard` | dashboard | autentikasi + current store |
 | `/produk` | products | tersedia — daftar/tambah/ubah/hapus produk |
 | `/kategori` | categories | tersedia — daftar/tambah/ubah/hapus kategori |
+| `/tim` | team | owner/admin — daftar & kelola anggota toko |
 | `/pelanggan`, `/transaksi`, `/pembayaran`, `/sesi-kas`, `/inventory`, `/pengaturan` | modul | placeholder "tersedia pada tahap berikutnya" |
 
 Menu Inventory hanya tampil untuk store yang mendukung inventory (retail,
@@ -153,6 +157,30 @@ memverifikasi.
 - Menghapus kategori yang masih dipakai produk ditolak backend → 409
   `category_in_use` ditampilkan sebagai notifikasi, bukan daftar kosong.
 
+### Tim (`/tim`)
+- Daftar anggota toko dengan pencarian + filter role/status + pagination
+  server-side; badge role (Pemilik/Admin/Kasir) dan status (Aktif/Nonaktif).
+- **Owner**: membuat satu akun admin (jika slot kosong), membuat kasir,
+  mengubah role admin↔kasir, serta mengaktifkan/menonaktifkan admin & kasir.
+- **Admin**: melihat anggota, membuat kasir, mengaktifkan/menonaktifkan kasir.
+- **Kasir**: tidak memiliki akses kelola anggota (menu disembunyikan dan rute
+  dijaga).
+- Akun karyawan dibuat **langsung** (tanpa undangan email). Tombol yang tidak
+  punya endpoint backend tidak ditampilkan. Aksi nonaktif/aktif dikonfirmasi;
+  kegagalan server tidak mengubah baris secara optimistis.
+- Pemetaan error: `409 admin_limit_reached` (admin aktif sudah ada),
+  `409 owner_protected` (owner tidak dapat diubah),
+  `409 email_already_registered` (email sudah dipakai), `422` per-field.
+
+### Wajib ganti kata sandi awal (`/ganti-password`)
+- Endpoint bisnis yang menolak dengan `403 password_change_required` menandai
+  sesi wajib ganti sandi, lalu mengarahkan ke halaman ini **tanpa logout**.
+- Route guard mencegah kembali ke halaman bisnis sampai selesai (tanpa redirect
+  loop; `/ganti-password` dan pemilihan toko dikecualikan).
+- Form: kata sandi saat ini, kata sandi baru (min. 8 karakter), konfirmasi.
+  Mengirim persis kontrak `ChangePasswordRequest`. Kata sandi tidak pernah
+  disimpan ke storage/log; setelah sukses diarahkan ke dashboard/pemilihan toko.
+
 ## CORS / Sanctum (integrasi)
 
 Untuk mengembangkan dari `http://localhost:5173` ke API Laravel:
@@ -163,17 +191,16 @@ Untuk mengembangkan dari `http://localhost:5173` ke API Laravel:
    tidak wajib. Bila beralih ke cookie SPA, konfigurasi tersebut diperlukan.
 3. Backend endpoint mengembalikan JSON; kirim header `Accept: application/json`.
 
-## Belum termasuk (setelah FE Checkpoint 2)
+## Belum termasuk (setelah FE Checkpoint 3)
 
 - CRUD pelanggan, transaksi, pembayaran, sesi kas, inventory.
 - Modul laporan/analitik (endpoint backend belum tersedia).
 - Area Super Admin platform (backend belum mendukung).
-- Manajemen tim/membership (endpoint backend belum tersedia).
 - Mode terang (light theme) — fokus pada satu dark theme premium.
 
 ## Dokumentasi terkait
 
-- `../docs/api/openapi.yaml` — spesifikasi API (51 operasi).
+- `../docs/api/openapi.yaml` — spesifikasi API (58 operasi).
 - `../docs/api/frontend-integration-guide.md` — kontrak & matriks permission.
 - `../docs/store-lifecycle.md` — kebijakan lifecycle store.
 - `../docs/production-deployment-checklist.md` — checklist deploy.

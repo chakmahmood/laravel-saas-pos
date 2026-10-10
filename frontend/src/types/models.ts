@@ -56,3 +56,13 @@ export interface RegisterResult extends LoginResult {
     business_type: BusinessType
   }
 }
+
+/**
+ * Payload for `POST /api/auth/change-password`. The backend validates the
+ * current password and clears `must_change_password` on success.
+ */
+export interface ChangePasswordPayload {
+  current_password: string
+  password: string
+  password_confirmation: string
+}

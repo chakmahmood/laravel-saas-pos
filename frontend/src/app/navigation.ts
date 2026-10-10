@@ -7,6 +7,8 @@ export interface NavItem {
   icon: IconName
   /** Only shown for stores that support inventory. */
   inventoryOnly?: boolean
+  /** Only shown to owners/admins (the route is guarded as well). */
+  managerOnly?: boolean
 }
 
 export interface NavSection {
@@ -41,6 +43,9 @@ export const NAV_SECTIONS: NavSection[] = [
   },
   {
     label: 'Sistem',
-    items: [{ name: 'settings', label: 'Pengaturan', icon: 'settings' }],
+    items: [
+      { name: 'team', label: 'Tim', icon: 'users', managerOnly: true },
+      { name: 'settings', label: 'Pengaturan', icon: 'settings' },
+    ],
   },
 ]
